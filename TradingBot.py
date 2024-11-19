@@ -107,10 +107,7 @@ class TradingBot:
 if __name__ == "__main__":
 
     #replace with my keys
-    polygon_api_key = "zuSAi5YpaO5tghum5I_mjAENN6g8GJrY"
-    alpaca_api_key = "PK3Q7DU6TGI2XYLFE3G0"
-    alpaca_secret_key = "ucmht0LDjmPRslVXt61AQpNcA58nnPsI9SFtO8VO"
-
+    
     #initialize bot
     bot = TradingBot(polygon_api_key, alpaca_api_key, alpaca_secret_key)
 
