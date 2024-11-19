@@ -6,6 +6,26 @@ class AlpacaAPI:
         self.api_key = api_key
         self.secret_key = secret_key
         self.base_url = base_url
+        self.positions = {}
+
+    def update_positions(self, symbol, signal):
+        if symbol in self.positions:
+            if signal == 1:
+                self.positions[symbol] = 1
+                return True
+            elif signal == -1:
+                self.positions[symbol] -= 1
+                return True      
+               
+        else:
+            if signal == 1:
+                self.positions[symbol] += 1
+                return True
+            else:
+                return False # can't sell something we don't have.
+
+            
+    
 
     def place_order(self, symbol, qty, side="buy", order_type="market", time_in_force="gtc"):
         url = f"{self.base_url}/v2/orders"
