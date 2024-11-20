@@ -1,14 +1,16 @@
 import AlpacaAPI 
-import PolygonAPI
+#import PolygonAPI
 import pandas as pd
 import numpy as np
 import threading
-import config
+from config import alpaca_api_key, alpaca_secret_key
+import time
+from datetime import datetime, timezone, timedelta
 
 
 class TradingBot:
     def __init__(self, polygon_key, alpaca_key, alpaca_secret):
-        self.polygon = PolygonAPI.PolygonAPI(polygon_key)#still not entirely sure why i need the polygon twice.
+        #self.polygon = PolygonAPI.PolygonAPI(polygon_key)#still not entirely sure why i need the polygon twice.
         self.alpaca = AlpacaAPI.AlpacaAPI(alpaca_key,alpaca_secret)
         self.running = True
         self.lock = threading.Lock()
@@ -76,13 +78,44 @@ class TradingBot:
 
         print(f"Trade for {symbol} completed. Notifying other threads.")
 
+    def evaluate_market_conditions(self, data, symbol):
+        ...
 
-    def monitor_market_conditions(self, data, symbol, lock):
-        current_avg, previous_avg = self.update_averages(data)
-        signal = self.moving_average_crossover(data[['ShortAvg', 'LongAvg']])[-1] #might need to replace with curr and prev
 
-        self.execute_trades(signal, symbol, lock)
+    def monitor_market(self, symbol):
+        """
+        watches market for a position to see if action should be taken
+        """
+        while self.running:
+            try:
+                now = datetime.utcnow()
+                start_date = (datetime.now(timezone.utc) - timedelta(days=60)).strftime('%Y-%m-%d')
+                data = self.alpaca.fetch_market_data(symbol,start_date, now.strftime('%Y-%m-%d'))
+                df = pd.DataFrame(data)
 
+                #Fetch updated postions
+                self.alpaca.fetch_positions()
+
+                #
+                decision, qty = self.evaluate_market_conditions(df, symbol)
+
+                if decision:
+                    with self.lock:
+                        self.alpaca.place_order(symbol,qty,side=decision)
+                else:
+                    print(f"Holding position for {symbol, qty, decision}")    
+            except Exception as e:
+                print(f"Error in monitoring market: {e}")
+            time.sleep(60)
+
+
+    def run(self, symbol): 
+        """
+        Starts the bot
+        """        
+        monitor_thread = threading.Thread(target=self.monitor_market, args=(symbol,))# extra ',' to make it a tuple
+        monitor_thread.start()
+        return monitor_thread
 
     def calculate_volatility(self, current_avg, previous_avg):
         """
