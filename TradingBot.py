@@ -1,19 +1,17 @@
-import pandas as pd
-#from AlpacaAPI import *
-import AlpacaAPI
-#from PolygonAPI import 
+import AlpacaAPI 
 import PolygonAPI
+import pandas as pd
 import numpy as np
 import threading
-import os
 import config
-
 
 
 class TradingBot:
     def __init__(self, polygon_key, alpaca_key, alpaca_secret):
         self.polygon = PolygonAPI.PolygonAPI(polygon_key)#still not entirely sure why i need the polygon twice.
         self.alpaca = AlpacaAPI.AlpacaAPI(alpaca_key,alpaca_secret)
+        self.running = True
+        self.lock = threading.Lock()
 
     def moving_average_crossover(self, data):
         """
@@ -30,6 +28,7 @@ class TradingBot:
         
         return np.array(signals)  # Return as NumPy array for easier processing
 
+
     def backtest_strategy(self, data):
         """
         Backtests the moving average crossover strategy.
@@ -45,37 +44,47 @@ class TradingBot:
 
         return returns
 
+
     def fetch_market_data(self, symbol, start_date, end_date):
         """
         Fetch historical market data from Polygon.io.
         """
         return self.polygon.get_historical_data(symbol, start_date, end_date)
 
-    def execute_trades(self, signal, symbol):
+    
+    def execute_trades(self, signal, symbol): # eventually should add a check to make sure that we have enough money to do this.
         """
         Execute trades based on the first signal.
         """
-        #open_orders = self.alpaca.get_open_orders(symbol)
-        #if open_orders:
-        #   print(f"Opend orders found for {symbol}: {open_orders})
-        #   return
-        if signal == 1: #if they want to buy
-            #eventually should add a check to make sure that we have enough money to do this.
-            print("Signal is BUY. Placing order...")
-            self.alpaca.place_order(symbol, 1, "buy")
-            self.alpaca.update_positions() 
-            
-        elif signal == -1: #if they want to sell:
-            if self.alpaca.update_positions():
-                print("Signal is SELL. Placing order...")
-                self.alpaca.place_order(symbol, 1, "sell")
+        with lock:          #ensure only one thread accesses this block at a time.
+            if signal == 1: # BUY
+                if self.alpaca.update_positions(symbol, signal):
+                    print("Signal is BUY. Placing order...")
+                    self.alpaca.place_order(symbol, 1, "buy")
+                else:
+                    print(f"Insufficient funds or position issue for {symbol}. Trade skipped.")
+                
+            elif signal == -1: # SELL
+                if self.alpaca.update_positions(symbol, signal):
+                    print("Signal is SELL. Placing order...")
+                    self.alpaca.place_order(symbol, 1, "sell")
+                else:
+                    print(f"No holdings to sell for {symbol}. Trade skipped.")
+
             else:
-                print("We cannot sell something that we don't have.")
+                print(f"No action taken for {symbol}.")
 
-        else:
-            print("No action taken.")
+        print(f"Trade for {symbol} completed. Notifying other threads.")
 
-    def monitor_volatility(self, current_avg, previous_avg):
+
+    def monitor_market_conditions(self, data, symbol, lock):
+        current_avg, previous_avg = self.update_averages(data)
+        signal = self.moving_average_crossover(data[['ShortAvg', 'LongAvg']])[-1] #might need to replace with curr and prev
+
+        self.execute_trades(signal, symbol, lock)
+
+
+    def calculate_volatility(self, current_avg, previous_avg):
         """
         Monitors volatility and identifies potential trend reversals.
         """
@@ -117,7 +126,7 @@ class TradingBot:
         """
         current_avg = data.iloc[-short_window:].mean().iloc[-1] #last 20 rows...
         previous_avg = data.iloc[-long_window:].mean() 
-        self.monitor_volatility(current_avg, previous_avg)
+        self.calculate_volatility(current_avg, previous_avg)
         return current_avg, previous_avg
     
 
@@ -155,21 +164,17 @@ if __name__ == "__main__":
     #Fetch historical data
     symbol = "NFLX"
     start_date = "2023-01-01"
-    end_date = "2024-11-14"
+    end_date = "2024-11-19"
     try:
         data:list = bot.fetch_market_data(symbol, start_date, end_date)
+        df = pd.DataFrame(data) #Process data into a DataFrame
+        df['ShortAvg'] = df['c'].rolling(20).mean().fillna(0) #Short-term mean close price
+        df['LongAvg'] = df['c'].rolling(50).mean().fillna(0)  #Long-term mean close price
+        #print(df.head())
         print("\nRaw Data:", data)
     except Exception as e:
         print(f"Error fetching market data: {e}")
 
-    
-
-    #Process data into a DataFrame
-    df = pd.DataFrame(data)
-    df['ShortAvg'] = df['c'].rolling(20).mean().fillna(0) #Short-term mean close price
-    df['LongAvg'] = df['c'].rolling(50).mean().fillna(0)  #Long-term mean close price
-    print(df.head())
-   
     signals = bot.moving_average_crossover(df[['ShortAvg', 'LongAvg']])
     returns = bot.backtest_strategy(df[['ShortAvg','LongAvg']])
     stop_loss_price = bot.calculate_stop_loss(entry_price=860, risk_threshold=.05)
@@ -177,6 +182,15 @@ if __name__ == "__main__":
     print("\nGenerate Signals: ", signals)
     print("Backtest returns:", returns)
     print(f"Stop loss price: {stop_loss_price}")
+
+    threads = []
+    for _ in range(5):
+        thread = threading.Thread(target=bot.monitor_market_conditions, args=(df, symbol, lock))
+        threads.append(thread)
+        thread.start()
+    
+    for thread in threads:
+        thread.join()
 
     #instead of directly executing trades I want to check on market conditions and then have it make an educated decision based on market data used in stop_loss, position vlaue, and the others, like volatility. it also has to incorporate the lock that i created so only one can execute at a time, the rest will wait, be notified(interrupted), made to wait again, until all have gone.
    
