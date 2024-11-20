@@ -10,7 +10,6 @@ from datetime import datetime, timezone, timedelta
 
 class TradingBot:
     def __init__(self, polygon_key, alpaca_key, alpaca_secret):
-        #self.polygon = PolygonAPI.PolygonAPI(polygon_key)#still not entirely sure why i need the polygon twice.
         self.alpaca = AlpacaAPI.AlpacaAPI(alpaca_key,alpaca_secret)
         self.running = True
         self.lock = threading.Lock()
@@ -79,7 +78,24 @@ class TradingBot:
         print(f"Trade for {symbol} completed. Notifying other threads.")
 
     def evaluate_market_conditions(self, data, symbol):
-        ...
+        """
+        Analyze market trends and make action decisions.
+        """
+        short_avg = data['c'].rolling(20).mean().iloc[-1]
+        long_avg = data['c'].rolling(50).mean().iloc[-1]
+        current_price = data['c'].iloc[-1]
+        atr = self.calculate_volatility(data)
+
+        # Decision logic
+        if short_avg > long_avg:
+            if symbol not in self.alpaca.positions:
+                return "buy", 1
+        elif short_avg < long_avg:
+            if symbol in self.alpaca.positions and current_price < (self.alpaca.positions[symbol] * 0.95):
+                return "sell", self.alpaca.positions[symbol]
+        else:
+            return None, 0
+            
 
 
     def monitor_market(self, symbol):
@@ -88,7 +104,7 @@ class TradingBot:
         """
         while self.running:
             try:
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 start_date = (datetime.now(timezone.utc) - timedelta(days=60)).strftime('%Y-%m-%d')
                 data = self.alpaca.fetch_market_data(symbol,start_date, now.strftime('%Y-%m-%d'))
                 df = pd.DataFrame(data)
@@ -117,27 +133,18 @@ class TradingBot:
         monitor_thread.start()
         return monitor_thread
 
-    def calculate_volatility(self, current_avg, previous_avg):
+    def calculate_volatility(self, data):
         """
-        Monitors volatility and identifies potential trend reversals.
+        Calculate volatility using ATR(Average True Range) or similar metrics
         """
-        if current_avg > previous_avg:
-            print("Trend is strong. Holding.")
-            return
+        high_low = data['h'] - data['l']
+        high_close = abs(data['h'] - data['c'].shift(1))
+        low_close = abs(data['l'] - data['c'].shift(1))
+        true_range = pd.concat([high_low, high_close, low_close]).max(axis=1)
+        atr = true_range.rolling(14).mean()
+        return atr.iloc[-1] # latest ATR value
+
         
-        # Set threshold for drop percentage
-        threshold = 5  # 5%
-
-        # Calculate drop percentage
-        drop_percentage = (previous_avg - current_avg) / previous_avg * 100
-
-        # Check if the drop exceeds the threshold
-        if drop_percentage >= threshold:
-            print("Trend has reversed. Sending SELL request...")
-            self.alpaca.place_order("SELL", 1, "sell")
-        else:
-            print(f"Trend is stabilizing. Drop percentage: {drop_percentage:.2f}%")
-
     def calculate_position_value(quantity, price):
         """
         Calculates the value of the current position based on quantity and price.
