@@ -1,3 +1,5 @@
+import asyncio
+from asyncio import tasks
 import AlpacaAPI 
 #import PolygonAPI
 import pandas as pd
@@ -7,9 +9,11 @@ from config import alpaca_api_key, alpaca_secret_key
 import time
 from datetime import datetime, timezone, timedelta
 
+import config
+
 
 class TradingBot:
-    def __init__(self, polygon_key, alpaca_key, alpaca_secret):
+    def __init__(self, alpaca_key, alpaca_secret):
         self.alpaca = AlpacaAPI.AlpacaAPI(alpaca_key,alpaca_secret)
         self.running = True
         self.lock = threading.Lock()
@@ -106,14 +110,15 @@ class TradingBot:
             try:
                 now = datetime.now(timezone.utc)
                 start_date = (datetime.now(timezone.utc) - timedelta(days=60)).strftime('%Y-%m-%d')
-                data = self.alpaca.fetch_market_data(symbol,start_date, now.strftime('%Y-%m-%d'))
+                data = self.alpaca.fetch_market_data(symbol=symbol, start_date=start_date, end_date=now.strftime('%Y-%m-%d'))
                 df = pd.DataFrame(data)
 
                 #Fetch updated postions
                 self.alpaca.fetch_positions()
-
-                #
+    
                 decision, qty = self.evaluate_market_conditions(df, symbol)
+
+
 
                 if decision:
                     with self.lock:
@@ -149,7 +154,8 @@ class TradingBot:
         """
         Calculates the value of the current position based on quantity and price.
         """
-        return quantity * price
+
+        return quantity * price * (.98)# accounting for slippage
 
 
     def calculate_stop_loss(self, entry_price, risk_threshold): # find out how to incorporate this.
@@ -169,6 +175,8 @@ class TradingBot:
         self.calculate_volatility(current_avg, previous_avg)
         return current_avg, previous_avg
     
+        
+    
 
 if __name__ == "__main__":
 
@@ -184,6 +192,7 @@ if __name__ == "__main__":
     )
 
     try:
+        tasks
         raw_data = bot.fetch_market_data(symbol, start_date, end_date)
         df = pd.DataFrame(raw_data)
         df['ShortAvg'] = df['c'].rolling(20).mean().fillna(0)
@@ -206,6 +215,9 @@ if __name__ == "__main__":
     start_date = "2023-01-01"
     end_date = "2024-11-19"
     try:
+        #tasks = [bot.fetch_market_data(symbol) for symbol in ['AAPL', 'TSLA', 'NFLX', 'SPY', 'NVDA', 'QQQ']] # i will need to modify this so that whenever a new stock of some sort is bought, it will be added to the list
+        #await asyncio.gather(*tasks)
+        #positions = self.alpaca.fetch_positions()
         data:list = bot.fetch_market_data(symbol, start_date, end_date)
         df = pd.DataFrame(data) #Process data into a DataFrame
         df['ShortAvg'] = df['c'].rolling(20).mean().fillna(0) #Short-term mean close price
@@ -217,7 +229,7 @@ if __name__ == "__main__":
 
     signals = bot.moving_average_crossover(df[['ShortAvg', 'LongAvg']])
     returns = bot.backtest_strategy(df[['ShortAvg','LongAvg']])
-    stop_loss_price = bot.calculate_stop_loss(entry_price=860, risk_threshold=.05)
+    stop_loss_price = bot.calculate_stop_loss(entry_price=(bot.calculate_position_value // bot.alpaca.positions[1]), risk_threshold=.05)
 
     print("\nGenerate Signals: ", signals)
     print("Backtest returns:", returns)
@@ -231,6 +243,7 @@ if __name__ == "__main__":
     
     for thread in threads:
         thread.join()
+
 
     #instead of directly executing trades I want to check on market conditions and then have it make an educated decision based on market data used in stop_loss, position vlaue, and the others, like volatility. it also has to incorporate the lock that i created so only one can execute at a time, the rest will wait, be notified(interrupted), made to wait again, until all have gone.
    

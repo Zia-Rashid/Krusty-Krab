@@ -1,7 +1,8 @@
 import requests
- 
+import asyncio
 import pandas as pd
 import threading
+import websockets
 
 
 class AlpacaAPI:
@@ -51,12 +52,37 @@ class AlpacaAPI:
         else:
             raise Exception(f"Alpaca API error: {response.status_code}, {response.text}")
         
+    def calculate_portfolio_value(positions, market_prices):
+        total_value = 0
+        for symbol, qty in positions.items():
+            total_value += qty * market_prices[symbol]
+        return total_value
+    
+    async def data_update(self, symbol):
+        """
+        Streams up-to-date data from the market
+        """
+        url = "wss://paper-api.alpaca.markets/stream"
+        async with websockets.connect(url) as websocket:
+            #while True:
+            asyncio.sleep(2)
+            request_data = { 
+                "action" : "get_data",
+                "parameters" : {
+                    "symbol" : "AAPL", 
+                    "interval" : "1m"
+                }
+            }
+            await websocket.send(str(request_data)) #Converts dit to JSON
+
+            response = await websocket.recv()               
+            print(f"Received: {response}")    
     
     def fetch_market_data(self, symbol, start_date, end_date):
         """
         Fetch historical data from Alpaca
         """
-        url = f"{self.base_url}/v2/orders"
+        url = f"{self.base_url}/v2/stocks/{symbol}/bars"
         headers = { 
             "APCA-API-KEY-ID": self.api_key,
             "APCA-API-SECRET-KEY": self.secret_key
@@ -66,8 +92,11 @@ class AlpacaAPI:
             "end" : end_date,
             "timeframe" : "1Day"
         }
+        #incorporate data_update()
+        #asyncio.run(data_update())
+
         response = requests.get(url, headers=headers, params=params)
         if response.status_code == 200:
-           return response.json()['bars']
+           return response.json().get('bars',[])
         else:
             raise Exception(f"Error fetching market data: {response.status_code}, {response.text}")
