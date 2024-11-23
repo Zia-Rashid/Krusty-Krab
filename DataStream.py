@@ -1,8 +1,10 @@
 import asyncio
 import websockets
 import websockets.connection
+import logging
 
-# connected_clients = set()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("DataStream")
 
 class Datastream:
     def __init__(self, uri):
@@ -13,26 +15,39 @@ class Datastream:
     async def connect(self):
         try:
             self.connection = await websockets.connect(self.uri)
-            print(f"Connected to the {self.uri}")
+            logger.info(f"Connected to the {self.uri}")
         except Exception as e:
-            print(f"Error connecting to {self.uri}: {e}")
+            logger.error(f"Error connecting to {self.uri}: {e}")
 
     async def send_data(self, data):
         if self.connection:
             await self.connection.send(data)
         else:
-            print("No connection established")
+            logger.warning("No connection established")
 
     async def receive_data(self):
         if self.connection:
             return await self.connection.recv()
         else:
-            print("No connection established")
+            logger.warning("No connection established")
 
     async def close(self):
         if self.connection:
             await self.connection.close()
-            print("Connection closed")
+            logger.info("Websocket connection closed")
+
+    async def connect_with_retries(self, retries=5, delay=2):
+        for attempt in range(retries):
+            try:
+                await self.connect()
+                logger.info("Websocket connection established")
+                return True
+            except Exception as e:
+                logger.error(f"Connection attempt {attempt + 1} failed: {e}")
+                await asyncio.sleep(delay * (2 ** attempt))  # Exponential backoff
+        logger.error("Max retries reached. Could not connect to WebSocket.")
+        return False
+
     
 
 #Main function to run the WebSocket connection
