@@ -1,10 +1,14 @@
-import AlpacaAPI 
+import json
+import AlpacaAPI
+import numpy as np
+from AlpacaAPI import AlpacaAPI
 import asyncio
 import websockets
 import pandas as pd
 import threading
 from datetime import datetime, timedelta
-import config
+from config import ALPACA_API_KEY
+from config import ALPACA_SECRET_KEY
 
 
 class TradingBot:
@@ -23,26 +27,36 @@ class TradingBot:
         Streams real-time data from Alpaca.
         """
         url = "wss://paper-api.alpaca.markets/stream"
-        async with websockets.connect(url) as websocket:
-            auth_data = {
-                "action": "authenticate",
-                "data": {
-                    "key_id": self.alpaca.api_key,
-                    "secret_key": self.alpaca.secret_key,
-                },
-            }
-            await websocket.send(auth_data)
+        for _ in range(3):
+            async with websockets.connect(url) as websocket:
+                try: 
+                    auth_data = {
+                        "action": "authenticate",
+                        "key": ALPACA_API_KEY,
+                        "secret": ALPACA_SECRET_KEY,
+                        }
+                    
+                    await websocket.send(json.dumps(auth_data))
 
-            # Subscribe to market data for the given symbol.
-            request_data = {
-                "action": "subscribe",
-                "bars": [symbol],
-            }
-            await websocket.send(request_data)
-
-            while self.running:
-                response = await websocket.recv()
-                await self.queue.put(response)  # Push response to the queue.
+                    # Subscribe to market data for the given symbol.
+                    request_data = {
+                        "action": "subscribe",
+                        "bars": [symbol],
+                    }
+                    await websocket.send(json.dumps(request_data))
+                    return
+                except ConnectionRefusedError:
+                    print(f"Connection refused. Retrying...")
+                    await asyncio.sleep(2)
+                print("Failed to connect to WebSocket server.")
+                    # while self.running:
+                    #     try:
+                    #         response = await websocket.recv()
+                    #         # Parse JSON response and push only relevant data
+                    #         data = json.loads(response)
+                    #         await self.queue.put(data)
+                    #     except Exception as e:
+                    #         print(f"Error streaming data for {symbol}: {e}")
 
 
     def moving_average_crossover(self, data):
@@ -147,16 +161,19 @@ class TradingBot:
                 else:
                     print(f"Holding position for {symbol}.")
                 await asyncio.sleep(60)  # Wait before the next update
-            except Exception as e:
+            except Exception as e:       
                 print(f"Error monitoring market for {symbol}: {e}")
+                # Debugging info
+                print(f"Debug: Stock={symbol}, Additional Data={data}")
+
 
 
     async def forward_to_local_server(self):
         """
         Forwards streamed data to the local WebSocket server.
         """
-        uri = "ws://localhost:9999"
-        async with websockets.connect(uri) as websocket:
+        url = "ws://localhost:9999"
+        async with websockets.connect(url) as websocket:
             while self.running:
                 try:
                     data = await self.queue.get()  # Fetch data from the queue.
@@ -165,20 +182,25 @@ class TradingBot:
                     print(f"Error forwarding data: {e}")
 
 
-    def run(self):
+    async def run(self):
         """
         Starts the bot for all positions.
         """
-        positions = self.alpaca.fetch_positions()
+        positions = self.alpaca.positions
         tasks = []
-
         for symbol in positions.keys():
-            tasks.append(self.alpaca.update_live_data(symbol))
-            tasks.append(self.monitor_market(symbol))
-            tasks.append(self.forward_to_local_server())
+            tasks.append(self.safe_task(self.update_live_data,symbol))     
+            tasks.append(self.safe_task(self.monitor_market, symbol))
+            tasks.append(self.safe_task(self.forward_to_local_server))
+        await asyncio.gather(*tasks)
 
-        # Run all tasks concurrently.
-        asyncio.run(asyncio.gather(*tasks))
+    async def safe_task(self, func, *args):
+        try:
+            await func(*args)
+        except Exception as e:
+            print(f"Error in {func.__name__}: {e}")
+                
+
 
     def calculate_volatility(self, data):
         """
@@ -219,9 +241,9 @@ class TradingBot:
     
 if __name__ == "__main__":
 
-    alpaca = AlpacaAPI(config.alpaca_api_key, config.alpaca_secret_key)
+    alpaca = AlpacaAPI(ALPACA_API_KEY, ALPACA_SECRET_KEY)
     bot = TradingBot(alpaca)
-    bot.run()
+    asyncio.run(bot.run())
 
     """
         #initialize bot
