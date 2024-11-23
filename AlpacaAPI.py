@@ -1,8 +1,6 @@
 import requests
 import asyncio
 import pandas as pd
-import threading
-import websockets
 
 
 class AlpacaAPI:
