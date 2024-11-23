@@ -23,6 +23,7 @@ class TradingBot:
         self.alpaca = alpaca_api
         self.running = True
         self.lock = threading.Lock()
+        
         self.queue = asyncio.Queue()  # Queue for sharing data_update output.
 
 
@@ -173,7 +174,7 @@ class TradingBot:
                 try:
                     print("in forward_t....()")
                     self.queue = asyncio.Queue(maxsize=100) # limit queue size
-                    
+
                     data = await self.queue.get()  # Fetch data from the queue.
                     await websocket.send(data)  # Forward to the local server.
                 except Exception as e:

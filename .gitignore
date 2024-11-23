@@ -2,3 +2,6 @@
 config.py
 PolygonAPI.py
 Krusty_Krab.py
+__pycache__
+Test.py
+.vscode
