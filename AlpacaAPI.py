@@ -63,19 +63,33 @@ class AlpacaAPI:
             total_value += qty * market_prices[symbol]
         return total_value
     
+
     async def update_live_data(self, symbol):
         """
-        Stream real-time market data via Alpaca WebSocket.
+        Streams real-time data from Alpaca.
         """
         url = "wss://paper-api.alpaca.markets/stream"
         async with websockets.connect(url) as websocket:
-            request_data = {"action": "subscribe", "params": {"symbols": [symbol], "interval": "1m"}}
+            auth_data = {
+                "action": "authenticate",
+                "data": {
+                    "key_id": self.alpaca.api_key,
+                    "secret_key": self.alpaca.secret_key,
+                },
+            }
+            await websocket.send(auth_data)
+
+            # Subscribe to market data for the given symbol.
+            request_data = {
+                "action": "subscribe",
+                "bars": [symbol],
+            }
             await websocket.send(request_data)
-            while True:
+
+            while self.running:
                 response = await websocket.recv()
-                print(f"Real-time data: {response}")
-                await asyncio.sleep(2) 
-                
+                await self.queue.put(response)  # Push response to the queue.
+
     
     def fetch_market_data(self, symbol, start_date, end_date):
         """

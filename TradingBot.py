@@ -217,9 +217,6 @@ class TradingBot:
         self.calculate_volatility(current_avg, previous_avg)
         return current_avg, previous_avg
     
-        
-    
-
 if __name__ == "__main__":
 
     alpaca = AlpacaAPI(config.alpaca_api_key, config.alpaca_secret_key)
