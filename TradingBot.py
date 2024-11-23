@@ -1,7 +1,4 @@
-"""
-@author Kamdin Bembry
-"""
-
+import signal
 import json
 import numpy as np
 import AlpacaAPI
@@ -17,6 +14,7 @@ from DataStream import *
 from config import ALPACA_API_KEY
 from config import ALPACA_SECRET_KEY
 import logging
+import alpaca_trade_api
     
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TradingBot")
@@ -30,18 +28,34 @@ class TradingBot:
         self.alpaca = alpaca_api
         self.running = True
         self.lock = threading.Lock()
-        self.queue = asyncio.Queue()  # Queue for sharing data_update output.
+        self.queue = asyncio.Queue(maxsize=1000)  # Queue for sharing data_update output.
         self.datastream = Datastream(datastream_uri) #datastream instance for websockets
 
+    def is_market_open(self):
+        try:
+            api = alpaca_trade_api.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY)
+            clock = api.get_clock()
+            return clock.is_open
+        except Exception as e:
+            logger.error(f"Error checking market status: {e}")
+            return False
 
-    async def update_live_data(self, symbols):
+
+
+    async def update_live_data(self, symbols:list):
         """
         Use Datastream to receive live data for the given symbol.
         """
         if not await self.datastream.connect_with_retries(): #retry if necessary
                 logger.error("Unable to establish Websocket connection")
+                for symbol in symbols:
+                    self.fetch_historical_data(symbol, "2023-01-01", "2024-11-22")
                 return
-        
+
+        if not self.is_market_open():
+            logger.info("Market is closed. Skipping love data updates...")
+            return
+
         try:
             # Authenticate w/ Alpaca API websocket
             auth_data = {
@@ -63,17 +77,30 @@ class TradingBot:
             
             while self.running:
                 try:
-                    data = await self.datastream.receive_data()
+                    data = await asyncio.wait_for(self.datastream.receive_data(),timeout=10)
                     if data:  # Only process non-None data
-                        await self.queue.put(json.loads(data))
+                        logger.debug(f"Raw data received: {e}")
+                        if self.queue.full():
+                            await self.queue.get_nowait()   # removes oldest item
+                        await self.queue.put_nowait(json.loads(data))  # adds new item
+                except asyncio.TimeoutError:
+                    logger.warning("Websocket recevied time out")
                 except Exception as e:
-                    logger.error(f"Error while retrieving data: {e}")
-                except json.JSONDecodeError as e:
-                    logger.error(f"Invalid json received: {e}")
+                    logger.error(f"Error while retreiving data: {e}")
         finally:
-            await self.datastream.close()
+                await self.datastream.close()
+            
+    
+    async def purge_queue(self):
+        while self.running:
+            try:
+                while not self.queue.empty():
+                    await self.queue.get_nowait()  # Clear one item
+                await asyncio.sleep(60)  # Run every 60 seconds
+            except Exception as e:
+                logger.error(f"Error purging queue: {e}")
 
-                        
+               
     def moving_average_crossover(self, data):
         """
         Strategy: Generate buy (1) and sell (-1) signals based on moving average crossover.
@@ -87,6 +114,34 @@ class TradingBot:
             else:
                 signals.append(0)  # No signal
         return np.array(signals)
+    
+    def fetch_historical_data(self, symbol, start_date, end_date):
+        try:
+            api = alpaca_trade_api.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY)
+            bars = api.get_bars(symbol, "1Day", start=start_date, end=end_date)
+            logger.info(f"Fetched historical data for {symbol}")
+            return bars
+        except Exception as e:
+            logger.error(f"Error fetching historical data: {e}")
+            return None
+
+
+    async def mock_data_stream(self, symbols):
+        """
+        Testing data since it is the weekend
+        """
+        while self.running:
+            try:
+                mock_data = {
+                    "stream": "bars",
+                    "data": {"symbol": symbols[0], "price": 150.00}
+                }
+                await self.queue.put_nowait(mock_data)
+                logger.info(f"Mock data: {mock_data}")
+                await asyncio.sleep(1)  # Simulate delay between updates
+            except Exception as e:
+                logger.error(f"Error in mock data stream: {e}")
+
 
 
     def backtest_strategy(self, data):
@@ -219,7 +274,8 @@ class TradingBot:
         tasks = [
             self.safe_task(self.update_live_data,symbols),    
             self.safe_task(self.monitor_market),
-            self.safe_task(self.forward_to_local_server)
+            self.safe_task(self.forward_to_local_server),
+            self.safe_task(self.purge_queue)
             ]
         print("In run(), pre gather")
         await asyncio.gather(*tasks) # asyncio.gather(*tasks) collects all the tasks in the list and runs them simultaneously using Python's asyncio framework.
@@ -230,7 +286,7 @@ class TradingBot:
         try:
             await func(*args)
         except Exception as e:
-            print(f"Error in {func.__name__}: {e}")
+            logger.error(f"Error in {func.__name__}: {e}")
                 
 
 
@@ -273,9 +329,21 @@ class TradingBot:
     
 if __name__ == "__main__":
 
+    def signal_handler(signal, frame):
+        bot.running = False
+        logger.info("Shutting down the bot...")
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     alpaca = AlpacaAPI(ALPACA_API_KEY, ALPACA_SECRET_KEY)
     datastream_uri = "wss://paper-api.alpaca.markets/stream"
     bot = TradingBot(alpaca, datastream_uri)
+
+    if not bot.is_market_open():
+        logger.info("Market is closed. Exiting bot.")
+        exit()
+
     asyncio.run(bot.run())
     print("In main(), post run()")
 
