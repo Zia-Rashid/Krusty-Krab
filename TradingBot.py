@@ -68,6 +68,8 @@ class TradingBot:
                         await self.queue.put(json.loads(data))
                 except Exception as e:
                     logger.error(f"Error while retrieving data: {e}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid json received: {e}")
         finally:
             await self.datastream.close()
 
@@ -150,52 +152,62 @@ class TradingBot:
     #             return "sell", self.alpaca.positions[symbol]
     #     else:
     #         return None, 0
-            
+          
 
-    async def monitor_market(self, symbol):
+    async def monitor_market(self):
         """
-        A method to monitor market conditions for the symbol, potentially watching for changes or thresholds.
-        """
+        A method to monitor market conditions for all symbols.
+        """  
         while self.running:
-            try: 
-                await asyncio.sleep(2)             
-                print("in monitor_market()")  
+            try:
                 data = await self.queue.get()
                 df = pd.DataFrame(data)
-                df['ShortAvg'] = df['c'].rolling(20).mean().fillna(0)
-                df['LongAvg'] = df['c'].rolling(50).mean().fillna(0)
-                signals = self.moving_average_crossover(df[['ShortAvg', 'LongAvg']])
-                if signals[-1] != 0:  # If there's a trade signal
-                    self.execute_trades(signals[-1], symbol)
-                else:
-                    print(f"Holding position for {symbol}.")
-                await asyncio.sleep(60)  # Wait before the next update
-            except Exception as e:       
-                logger.error(f"Error in {function.__name__}: {e}")
-                # Debugging info
-                print(f"Debug: Stock={symbol}, Additional Data={data}")
+                for symbol in df['symbol'].unique():  # Iterate over all symbols
+                    symbol_data = df[df['symbol'] == symbol]
+                    symbol_data['ShortAvg'] = symbol_data['c'].rolling(20).mean()
+                    symbol_data['LongAvg'] = symbol_data['c'].rolling(50).mean()
+                    signals = self.moving_average_crossover(symbol_data[['ShortAvg', 'LongAvg']])
+                    if signals[-1] != 0:
+                        self.execute_trades(signals[-1], symbol)
+                    else:
+                        logger.info(f"Holding position for {symbol}.")
+                await asyncio.sleep(60)  # Sleep before processing new data
+            except Exception as e:
+                logger.error(f"Error monitoring market: {e}")
 
 
 
     async def forward_to_local_server(self):
         """
-        Use Datastream to forward data to a local server.
+        Forward data to the local WebSocket server at ws://localhost:8080.
         """
         local_uri = "ws://localhost:8080"
         local_stream = Datastream(local_uri)
         try:
-            await local_stream.connect()
+            if not await local_stream.connect_with_retries():
+                logger.error("Unable to connect to the local WebSocket server.")
+                return
+            
             while self.running:
                 try:
+                    # Fetch data from the bot's queue
                     data = await self.queue.get()
+                    
+                    # Send data to the server
                     await local_stream.send_data(json.dumps(data))
+                    logger.info(f"Data forwarded to local server: {data}")
+                    
+                    # Await server's response (optional)
+                    response = await local_stream.receive_data()
+                    logger.info(f"Response from server: {response}")
                 except Exception as e:
                     await asyncio.sleep(.5)
                     logger.error(f"Error forwarding data: {e}")
         except Exception as e:
             logger.error(f"Error connecting to local server: {e}")
-        finally:
+        finally:        
             await local_stream.close()
+
 
 
     async def run(self):
@@ -206,7 +218,7 @@ class TradingBot:
         symbols = list(positions.keys())
         tasks = [
             self.safe_task(self.update_live_data,symbols),    
-            #self.safe_task(self.monitor_market, symbol)
+            self.safe_task(self.monitor_market),
             self.safe_task(self.forward_to_local_server)
             ]
         print("In run(), pre gather")
