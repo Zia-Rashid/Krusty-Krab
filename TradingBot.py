@@ -14,7 +14,7 @@ from DataStream import *
 from config import ALPACA_API_KEY
 from config import ALPACA_SECRET_KEY
 import logging
-import alpaca_trade_api
+import alpaca_trade_api as trade_api
     
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TradingBot")
@@ -33,7 +33,7 @@ class TradingBot:
 
     def is_market_open(self):
         try:
-            api = alpaca_trade_api.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY)
+            api = trade_api.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, base_url="https://paper-api.alpaca.markets")
             clock = api.get_clock()
             return clock.is_open
         except Exception as e:
@@ -117,7 +117,7 @@ class TradingBot:
     
     def fetch_historical_data(self, symbol, start_date, end_date):
         try:
-            api = alpaca_trade_api.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY)
+            api = trade_api.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, base_url="https://paper-api.alpaca.markets")
             bars = api.get_bars(symbol, "1Day", start=start_date, end=end_date)
             logger.info(f"Fetched historical data for {symbol}")
             return bars
