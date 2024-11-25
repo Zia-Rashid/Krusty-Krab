@@ -265,6 +265,29 @@ class TradingBot:
             await local_stream.close()
 
 
+    async def health_check(self):
+        """
+        Periodically checks if the bot is functioning correctly.
+        If not, gracefully shuts down or restarts the bot.
+        """
+        while self.running:
+            try:
+                # Example checks
+                if not self.datastream.is_connected():
+                    logger.warning("WebSocket disconnected. Reconnecting...")
+                    await self.datastream.connect_with_retries()
+                
+                # Add more health checks (e.g., queue size, Alpaca API availability)
+                if self.queue.qsize() > 1000:
+                    logger.warning("Queue size too large. Purging...")
+                    await self.purge_queue()
+
+                logger.info("Health check passed.")
+            except Exception as e:
+                logger.error(f"Health check failed: {e}")
+                self.running = False  # Stop the bot to allow for external restart
+            await asyncio.sleep(300)  # Run every 5 minutes
+
 
     async def run(self):
         """
@@ -276,7 +299,8 @@ class TradingBot:
             self.safe_task(self.update_live_data,symbols),    
             self.safe_task(self.monitor_market),
             self.safe_task(self.forward_to_local_server),
-            self.safe_task(self.purge_queue)
+            self.safe_task(self.purge_queue),
+            self.safe_task(self.health_check)
             ]
         print("In run(), pre gather")
         await asyncio.gather(*tasks) # asyncio.gather(*tasks) collects all the tasks in the list and runs them simultaneously using Python's asyncio framework.

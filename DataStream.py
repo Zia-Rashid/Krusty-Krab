@@ -12,6 +12,10 @@ class Datastream:
         self.connection = None    
 
 
+    async def is_connected(self):
+        return self.connection
+
+
     async def connect(self):
         try:
             self.connection = await websockets.connect(self.uri)
