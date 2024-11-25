@@ -30,6 +30,7 @@ class TradingBot:
         self.lock = threading.Lock()
         self.queue = asyncio.Queue(maxsize=1000)  # Queue for sharing data_update output.
         self.datastream = Datastream(datastream_uri) #datastream instance for websockets
+        self.buy_prices = {}  # Track buy prices for symbols # <--- To be Implemented
 
     def is_market_open(self):
         try:
@@ -346,3 +347,25 @@ if __name__ == "__main__":
 
     asyncio.run(bot.run())
     print("In main(), post run()")
+
+
+"""
+To add this additional logic to your bot, we need to integrate conditions for:
+
+Track Buy Price-
+When the bot executes a buy order, store the buy price for the stock.
+Use a dictionary, self.buy_prices, to store the buy prices for each symbol.
+
+Define Sell Conditions-
+If the current price drops below the buy price, execute a sell order.
+Add an optional threshold percentage to trigger an early sell.
+
+Monitor for Rebound/Rebuy Opportunities-
+After selling, watch the stock for an upward trend or percentage recovery from its lowest price.
+If the price rises again, issue a buy signal.
+
+Websocket disconnection-
+along with the above, think about the case in which we are disconnected midway. 
+what can we do to prevent/recover from that?
+
+"""
