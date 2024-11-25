@@ -1,17 +1,17 @@
 import asyncio
-import websockets   
+import websockets  
 import json
 
-async def handle_connection(websocket, path):
+async def handle_connection(websockets, path):
     print(f"Client connected")
     try:
-        async for message in websocket:
+        async for message in websockets:
             # Log received data
             print(f"Received: {message}")
             
             # Optionally, send a response back to the client
             response = {"status": "success", "received_data": message}
-            await websocket.send(json.dumps(response))
+            await websockets.send(json.dumps(response))
     except websockets.exceptions.ConnectionClosed:
         print("Client disconnected")
     except Exception as e:

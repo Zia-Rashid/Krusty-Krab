@@ -6,4 +6,5 @@ __pycache__
 Test.py
 .vscode
 upload.txt
-
+ToDoList.txt
+get-pip.py

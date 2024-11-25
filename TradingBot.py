@@ -48,11 +48,11 @@ class TradingBot:
         """
         Use Datastream to receive live data for the given symbol.
         """
-        if not await self.datastream.connect_with_retries(): #retry if necessary
-                logger.error("Unable to establish Websocket connection")
-                for symbol in symbols:
-                    self.fetch_historical_data(symbol, "2023-01-01", "2024-11-22")
-                return
+        # if not await self.datastream.connect_with_retries(): #retry if necessary
+        #         logger.error("Unable to establish Websocket connection")
+        #         for symbol in symbols:
+        #             self.fetch_historical_data(symbol, "2023-01-01", "2024-11-22")
+        #         return
 
         if not self.is_market_open():
             logger.info("Market is closed. Skipping love data updates...")
@@ -79,9 +79,9 @@ class TradingBot:
             
             while self.running:
                 try:
-                    data = await asyncio.wait_for(self.datastream.receive_data(),timeout=10)
+                    data = await self.datastream.receive_data() #asyncio.wait_for(self.datastream.receive_data(),timeout=10)
                     if data:  # Only process non-None data
-                        logger.debug(f"Raw data received: {e}")
+                        logger.debug(f"Raw data received: {data}")
                         if self.queue.full():
                             await self.queue.get_nowait()   # removes oldest item
                         await self.queue.put_nowait(json.loads(data))  # adds new item
@@ -355,10 +355,11 @@ class TradingBot:
     
 if __name__ == "__main__":
 
-    def signal_handler(signal, frame):
+    async def signal_handler(signal, frame):
         bot.running = False
         logger.info("Shutting down the bot...")
-        asyncio.run(bot.datastream.close())
+        #bot.datastream.close()
+        await asyncio.run(bot.datastream.close())
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -367,6 +368,7 @@ if __name__ == "__main__":
     alpaca = AlpacaAPI(ALPACA_API_KEY, ALPACA_SECRET_KEY)
     datastream_uri = "wss://paper-api.alpaca.markets/stream"
     bot = TradingBot(alpaca, datastream_uri)
+    asyncio.run(bot.datastream.connect())
 
     if not bot.is_market_open():
         logger.info("Market is closed. Exiting bot.")

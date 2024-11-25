@@ -1,6 +1,5 @@
 import asyncio
 import websockets
-import websockets.connection
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -12,46 +11,57 @@ class Datastream:
         self.connection = None    
 
 
-    async def is_connected(self):
-        return self.connection
-
-
     async def connect(self):
         try:
             self.connection = await websockets.connect(self.uri)
             logger.info(f"Connected to the {self.uri}")
         except Exception as e:
             logger.error(f"Error connecting to {self.uri}: {e}")
+            self.connection = None
 
     async def send_data(self, data):
         if self.connection:
-            await self.connection.send(data)
+            try:
+                await self.connection.send(data)
+                logger.info(f"Send data: {data}")
+            except Exception as e:
+                logger.error(f"Failed to sent data: {e}")
         else:
-            logger.warning("No connection established")
+            logger.warning("No connection established. Unable to send data.")
+            asyncio.sleep(2)
+            
 
     async def receive_data(self):
         if self.connection:
-            return await self.connection.recv()
+            try:
+                data = await self.connection.recv()
+                logger.info(f"Reveived data: {data}")
+                return data
+            except Exception as e:
+                logger.error(f"Error receiving data: {e}")
+                return None
         else:
-            logger.warning("No connection established")
+            logger.warning("No connection established. Unable to receive data.")
+            return None
 
     async def close(self):
         if self.connection:
-            await self.connection.close()
-            logger.info("Websocket connection closed")
+            try:
+                await self.connection.close()
+                logger.info("Websocket connection closed")
+            except Exception as e:
+                logger.error(f"Error closing connection: {e}")
 
     async def connect_with_retries(self, retries=5, delay=2):
         for attempt in range(retries):
-            try:
-                await self.connect()
+            await self.connect()
+            if self.connection:
                 logger.info("Websocket connection established")
                 return True
-            except Exception as e:
-                logger.error(f"Connection attempt {attempt + 1} failed: {e}")
-                await asyncio.sleep(delay * (2 ** attempt))  # Exponential backoff
-        logger.error("Max retries reached. Could not connect to WebSocket.")
+            logger.warning(f"Retrying connection in {delay} seconds")
+            await asyncio.sleep(delay)
+        logger.error("Max tries reached. Could not connect to WebSocket.")
         return False
-
     
 
 #Main function to run the WebSocket connection
@@ -64,7 +74,8 @@ async def main():
         
         #Receiving a response
         response = await datastream.receive_data()
-        print(response)
+        if response:
+            print(response)
         
         await datastream.close()
 
