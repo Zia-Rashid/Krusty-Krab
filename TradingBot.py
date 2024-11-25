@@ -14,6 +14,7 @@ from DataStream import *
 from config import ALPACA_API_KEY
 from config import ALPACA_SECRET_KEY
 import logging
+import sys
 import alpaca_trade_api as trade_api
     
 logging.basicConfig(level=logging.INFO)
@@ -357,6 +358,8 @@ if __name__ == "__main__":
     def signal_handler(signal, frame):
         bot.running = False
         logger.info("Shutting down the bot...")
+        asyncio.run(bot.datastream.close())
+        sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
