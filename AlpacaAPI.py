@@ -1,4 +1,5 @@
 import alpaca_trade_api as tradeapi
+from datetime import date
 
 
 class AlpacaAPI:
@@ -46,7 +47,7 @@ class AlpacaAPI:
         except tradeapi.rest.APIError as e:
             raise Exception(f"Error fetching portfolio value: {e}")
 
-    def fetch_historical_data(self, symbol, start_date, end_date, timeframe="day"):
+    def fetch_historical_data(self, symbol, start_date, end_date, timeframe="1D"):
         """
         Fetch historical market data.
         """
@@ -93,7 +94,12 @@ if __name__ == "__main__":
         print(e)
 
     # Fetch historical data
-    data = alpaca.fetch_historical_data("AAPL", "2023-01-01", "2024-11-22")
+    parts = str(date.today()).split("-")
+    part = int(parts[2]) - 1
+    yesterday = f"{parts[0]}-{parts[1]}-{part}"
+    print(str(yesterday))
+
+    data = alpaca.fetch_historical_data("AAPL", "2024-11-01", yesterday)
     print(data)
 
     # Check if market is open

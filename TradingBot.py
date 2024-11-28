@@ -15,6 +15,7 @@ import logging
 import sys
 import alpaca_trade_api as trade_api
 import MockDataStream
+from datetime import date
     
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TradingBot")
@@ -29,7 +30,7 @@ class TradingBot:
         self.running = True
         self.lock = threading.Lock()
         self.queue = asyncio.Queue(maxsize=1000)  # Queue for sharing data_update output.
-        self.datastream = MockDataStream#Datastream(datastream_uri) #datastream instance for websockets
+        self.datastream = Datastream(datastream_uri) #datastream instance for websockets
         self.buy_prices = {}  # Track buy prices for symbols # <--- To be Implemented
 
     def is_market_open(self):
@@ -47,11 +48,11 @@ class TradingBot:
         """
         Use Datastream to receive live data for the given symbol.
         """
-        # if not await self.datastream.connect_with_retries(): #retry if necessary
-        #         logger.error("Unable to establish Websocket connection")
-        #         for symbol in symbols:
-        #             self.fetch_historical_data(symbol, "2023-01-01", "2024-11-22")
-        #         return
+        if not await self.datastream.connect_with_retries(): #retry if necessary
+                logger.error("Unable to establish Websocket connection")
+                for symbol in symbols:
+                    self.fetch_historical_data(symbol, "2024-11-01", date.today())
+                return
 
         if not self.is_market_open():
             logger.info("Market is closed. Skipping love data updates...")
@@ -115,16 +116,6 @@ class TradingBot:
             else:
                 signals.append(0)  # No signal
         return np.array(signals)
-    
-    def fetch_historical_data(self, symbol, start_date, end_date):
-        try:
-            api = trade_api.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, base_url="https://paper-api.alpaca.markets")
-            bars = api.get_bars(symbol, "1Day", start=start_date, end=end_date)
-            logger.info(f"Fetched historical data for {symbol}")
-            return bars
-        except Exception as e:
-            logger.error(f"Error fetching historical data: {e}")
-            return None
         
 
     def backtest_strategy(self, data):
