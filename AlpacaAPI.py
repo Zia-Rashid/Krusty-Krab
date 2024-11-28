@@ -47,12 +47,16 @@ class AlpacaAPI:
         except tradeapi.rest.APIError as e:
             raise Exception(f"Error fetching portfolio value: {e}")
 
-    def fetch_historical_data(self, symbol, start_date, end_date, timeframe="1D"):
+    def fetch_historical_data(self, symbol, start_date, timeframe="1D"):
         """
         Fetch historical market data.
         """
+        parts = str(date.today()).split("-")
+        part = int(parts[2]) - 1
+        yesterday = f"{parts[0]}-{parts[1]}-{part}"
+        
         try:
-            bars = self.api.get_bars(symbol, timeframe, start=start_date, end=end_date).df
+            bars = self.api.get_bars(symbol, timeframe, start=start_date, end=yesterday).df
             return bars
         except tradeapi.rest.APIError as e:
             raise Exception(f"Error fetching historical data: {e}")
@@ -94,12 +98,7 @@ if __name__ == "__main__":
         print(e)
 
     # Fetch historical data
-    parts = str(date.today()).split("-")
-    part = int(parts[2]) - 1
-    yesterday = f"{parts[0]}-{parts[1]}-{part}"
-    print(str(yesterday))
-
-    data = alpaca.fetch_historical_data("AAPL", "2024-11-01", yesterday)
+    data = alpaca.fetch_historical_data("NFLX", "2024-11-01")
     print(data)
 
     # Check if market is open
