@@ -20,7 +20,7 @@ async def handle_connection(websockets, path):
 async def main():
     # Start the WebSocket server on localhost:8080
     server = await websockets.serve(handle_connection, "0.0.0.0", 8080)
-    print("Server is running on ws://localhost:8080")
+    print("Server is running on ws://localhost:8080" )
     await server.wait_closed()
 
 if __name__ == "__main__":

@@ -2,20 +2,19 @@ import signal
 import json
 import numpy as np
 import AlpacaAPI
-from AlpacaAPI import AlpacaAPI
 from AlpacaAPI import *
 import asyncio
 import websockets
 import pandas as pd
 import threading
 import DataStream
-from DataStream import Datastream
 from DataStream import *
 from config import ALPACA_API_KEY
 from config import ALPACA_SECRET_KEY
 import logging
 import sys
 import alpaca_trade_api as trade_api
+import MockDataStream
     
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TradingBot")
@@ -30,7 +29,7 @@ class TradingBot:
         self.running = True
         self.lock = threading.Lock()
         self.queue = asyncio.Queue(maxsize=1000)  # Queue for sharing data_update output.
-        self.datastream = Datastream(datastream_uri) #datastream instance for websockets
+        self.datastream = MockDataStream#Datastream(datastream_uri) #datastream instance for websockets
         self.buy_prices = {}  # Track buy prices for symbols # <--- To be Implemented
 
     def is_market_open(self):
@@ -126,25 +125,7 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Error fetching historical data: {e}")
             return None
-
-
-    async def mock_data_stream(self, symbols):
-        """
-        Testing data since it is the weekend
-        """
-        while self.running:
-            try:
-                mock_data = {
-                    "stream": "bars",
-                    "data": {"symbol": symbols[0], "price": 150.00}
-                }
-                await self.queue.put_nowait(mock_data)
-                logger.info(f"Mock data: {mock_data}")
-                await asyncio.sleep(1)  # Simulate delay between updates
-            except Exception as e:
-                logger.error(f"Error in mock data stream: {e}")
-
-
+        
 
     def backtest_strategy(self, data):
         """
@@ -209,7 +190,7 @@ class TradingBot:
     #             return "sell", self.alpaca.positions[symbol]
     #     else:
     #         return None, 0
-          
+
 
     async def monitor_market(self):
         """
@@ -303,17 +284,13 @@ class TradingBot:
             self.safe_task(self.purge_queue),
             self.safe_task(self.health_check)
             ]
-        print("In run(), pre gather")
-        await asyncio.gather(*tasks) # asyncio.gather(*tasks) collects all the tasks in the list and runs them simultaneously using Python's asyncio framework.
-        print("In run(), post gather")
-
+    
 
     async def safe_task(self, func, *args):
         try:
             await func(*args)
         except Exception as e:
             logger.error(f"Error in {func.__name__}: {e}")
-                
 
 
     def calculate_volatility(self, data):
@@ -365,6 +342,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # START REAL ********
     alpaca = AlpacaAPI(ALPACA_API_KEY, ALPACA_SECRET_KEY)
     datastream_uri = "wss://paper-api.alpaca.markets/stream"
     bot = TradingBot(alpaca, datastream_uri)
@@ -376,7 +354,7 @@ if __name__ == "__main__":
 
     asyncio.run(bot.run())
     print("In main(), post run()")
-
+    # END REAL **********
 
 """
 To add this additional logic to your bot, we need to integrate conditions for:
