@@ -104,3 +104,5 @@ if __name__ == "__main__":
     # Check if market is open
     is_open = alpaca.is_market_open()
     print("Market is open:", is_open)
+    print("\n\n")
+    print(alpaca.calculate_portfolio_value())

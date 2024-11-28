@@ -156,7 +156,7 @@ class TradingBot:
                 logger.info(f"Placing SELL order for {symbol}")
 
             print(f"Trade for {symbol} completed. Notifying other threads.")
-            self.lock.notifyAll() #Notify waiting threads that they can now trade
+            threading.Condition(self.lock) #Notify waiting threads that they can now trade   # check if this works
 
             
 
@@ -327,6 +327,7 @@ if __name__ == "__main__":
         bot.running = False
         logger.info("Shutting down the bot...")
         #bot.datastream.close()
+        print(f"Portfolio value: {bot.alpaca.calculate_portfolio_value()}")
         await asyncio.run(bot.datastream.close())
         sys.exit(0)
 
