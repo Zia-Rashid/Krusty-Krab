@@ -19,30 +19,48 @@ class Datastream:
             logger.error(f"Error connecting to {self.uri}: {e}")
             self.connection = None
 
+
+    async def keep_alive(self):
+        """
+        Pings to prevent connection timeout
+        """
+        while self.running:
+            try:
+                if self.connection and not self.connection.closed:
+                    await self.connection.ping()
+                    logger.info("Ping sent to keep connection alive.")
+            except Exception as e:
+                logger.error(f"Error sending ping: {e}")
+            await asyncio.sleep(30)  # Send a ping every 30 seconds
+
+
     async def send_data(self, data):
-        if self.connection:
+        """
+        send requests(Trade/Connection) to AlpacaAPI
+        """
+        if self.connection and not self.connection.closed:
             try:
                 await self.connection.send(data)
-                logger.info(f"Send data: {data}")
+            except websockets.exceptions.ConnectionClosed:
+                logger.warning("Connection closed while sending data. Reconnecting...")
+                await self.connect_with_retries()
             except Exception as e:
-                logger.error(f"Failed to sent data: {e}")
-        else:
-            logger.warning("No connection established. Unable to send data.")
-            asyncio.sleep(2)
-            
+                logger.error(f"Error sending data: {e}")
+                
 
     async def receive_data(self):
-        if self.connection:
+        """
+        receive data from AlpacaAPI
+        """
+        if self.connection and not self.connection.closed:
             try:
-                data = await self.connection.recv()
-                logger.info(f"Reveived data: {data}")
-                return data
+                return await self.connection.recv()
+            except websockets.exceptions.ConnectionClosed:
+                logger.warning("Connection closed while receiving data. Reconnecting...")
+                await self.connect_with_retries()
             except Exception as e:
                 logger.error(f"Error receiving data: {e}")
-                return None
-        else:
-            logger.warning("No connection established. Unable to receive data.")
-            return None
+        return None
 
     async def close(self):
         if self.connection:
