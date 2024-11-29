@@ -44,40 +44,50 @@ class TradingBot:
 
 
 
-    async def update_live_data(self, symbols:list):
-        """
-        Use Datastream to receive live data for the given symbol.
-        """
-        if not await self.datastream.connect_with_retries(): #retry if necessary
-                logger.error("Unable to establish Websocket connection")
-                for symbol in symbols:
-                    self.fetch_historical_data(symbol, "2024-11-01", date.today())
+    async def update_live_data(self, symbols: list):
+        while self.running:
+
+            if not self.is_market_open():
+                logger.info("Market is closed. Skipping love data updates...")
                 return
 
-        if not self.is_market_open():
-            logger.info("Market is closed. Skipping love data updates...")
-            return
+            try:
+                if not self.datastream.connection or self.datastream.connection.closed:
+                    logger.info("Reconnecting WebSocket...")
+                    await self.datastream.connect_with_retries()
 
-        try:
-            # Authenticate w/ Alpaca API websocket
-            auth_data = {
-                "action": "authenticate",
-                "key": ALPACA_API_KEY,
-                "secret": ALPACA_SECRET_KEY,
-            }
-            await self.datastream.send_data(json.dumps(auth_data))  
-            response = await self.datastream.receive_data() 
-            logger.info(f"Auth response: {response}")
+                if not self.datastream.connection or self.datastream.connection.closed:
+                    logger.error("Failed to reconnect WebSocket. Retrying...")
+                    await asyncio.sleep(5)
+                    continue
 
-            # Subscribe to market data for multiple symbols in one connection
-            request_data = {
-                "action": "subscribe",
-                "bars": symbols,
-            }
-            await self.datastream.send_data(json.dumps(request_data))
-            logger.info(f"Subscribed to {symbols}")
+                data = await self.datastream.receive_data()
+                if data:
+                    await self.queue.put_nowait(json.loads(data))
+            except Exception as e:
+                logger.error(f"Error in update_live_data: {e}")
+                await asyncio.sleep(5)
+
+
+            try:
+                # Authenticate w/ Alpaca API websocket
+                auth_data = {
+                    "action": "authenticate",
+                    "key": ALPACA_API_KEY,
+                    "secret": ALPACA_SECRET_KEY,
+                }
+                await self.datastream.send_data(json.dumps(auth_data))  
+                response = await self.datastream.receive_data() 
+                logger.info(f"Auth response: {response}")
+
+                # Subscribe to market data for multiple symbols in one connection
+                request_data = {
+                    "action": "subscribe",
+                    "bars": symbols,
+                }
+                await self.datastream.send_data(json.dumps(request_data))
+                logger.info(f"Subscribed to {symbols}")     
             
-            while self.running:
                 try:
                     data = await self.datastream.receive_data() #asyncio.wait_for(self.datastream.receive_data(),timeout=10)
                     if data:  # Only process non-None data
@@ -89,8 +99,9 @@ class TradingBot:
                     logger.warning("Websocket recevied time out")
                 except Exception as e:
                     logger.error(f"Error while retreiving data: {e}")
-        finally:
-                await self.datastream.close()
+
+            finally:
+                    await self.datastream.close()
             
     
     async def purge_queue(self):
@@ -246,7 +257,7 @@ class TradingBot:
         while self.running:
             try:
                 # Example checks
-                if not self.datastream.is_connected():
+                if not self.datastream.connect():
                     logger.warning("WebSocket disconnected. Reconnecting...")
                     await self.datastream.connect_with_retries()
                 
@@ -275,6 +286,7 @@ class TradingBot:
             self.safe_task(self.purge_queue),
             self.safe_task(self.health_check)
             ]
+        await asyncio.gather(*tasks)
     
 
     async def safe_task(self, func, *args):

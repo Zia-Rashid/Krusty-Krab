@@ -53,7 +53,13 @@ class Datastream:
                 logger.error(f"Error closing connection: {e}")
 
     async def connect_with_retries(self, retries=5, delay=2):
+        """
+        will now check to see if there are already existing connections established
+        """
         for attempt in range(retries):
+            if self.connection and not self.connection.closed:
+                logger.info("Connection already established.")
+                return True
             await self.connect()
             if self.connection:
                 logger.info("Websocket connection established")
@@ -62,6 +68,7 @@ class Datastream:
             await asyncio.sleep(delay)
         logger.error("Max tries reached. Could not connect to WebSocket.")
         return False
+
     
 
 #Main function to run the WebSocket connection
