@@ -16,7 +16,8 @@ class AlpacaAPI:
         """
         try:
             positions = self.api.list_positions()
-            self.positions = {pos.symbol: int(pos.qty) for pos in positions}
+            #print(positions)
+            self.positions = {pos.symbol: [int(pos.qty), float(pos.current_price)] for pos in positions}
             return self.positions
         except tradeapi.rest.APIError as e:
             raise Exception(f"Error fetching positions: {e}")
@@ -91,18 +92,18 @@ if __name__ == "__main__":
     positions = alpaca.fetch_positions()
     print("Positions:", positions)
 
-    # Place an order
-    try:
-        alpaca.place_order("AAPL", 1, side="buy")
-    except Exception as e:
-        print(e)
+    # # Place an order
+    # try:
+    #     alpaca.place_order("AAPL", 1, side="buy")
+    # except Exception as e:
+    #     print(e)
 
-    # Fetch historical data
-    data = alpaca.fetch_historical_data("NFLX", "2024-11-01")
-    print(data)
+    # # Fetch historical data
+    # data = alpaca.fetch_historical_data("NFLX", "2024-11-01")
+    # print(data)
 
-    # Check if market is open
-    is_open = alpaca.is_market_open()
-    print("Market is open:", is_open)
-    print("\n\n")
+    # # Check if market is open
+    # is_open = alpaca.is_market_open()
+    # print("Market is open:", is_open)
+    # print("\n\n")
     print(alpaca.calculate_portfolio_value())
