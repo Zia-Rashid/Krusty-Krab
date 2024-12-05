@@ -61,6 +61,12 @@ class AlpacaAPI:
             return bars
         except tradeapi.rest.APIError as e:
             raise Exception(f"Error fetching historical data: {e}")
+    
+    def fetch_raw_data(self, symbol):
+        """
+        Fetches all of the current data
+        """
+        return self.api.get_latest_bar(symbol=symbol, feed='iex')
 
     def is_market_open(self):
         """

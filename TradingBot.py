@@ -14,6 +14,7 @@ import logging
 import sys
 import alpaca_trade_api as trade_api
 from datetime import date
+#import backtesting
     
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)#="TradingBot"
@@ -69,10 +70,11 @@ class TradingBot:
                 logger.error(f"Error purging queue: {e}")
 
                
-    def moving_average_crossover(self, data):
+    def moving_average_crossover(self, symbol):
         """
         Strategy: Generate buy (1) and sell (-1) signals based on moving average crossover.
         """
+        data = self.alpaca.fetch_historical_data(symbol, "2024-10-01")
         signals = []
         for i in range(len(data)):
             if data.iloc[i, 0] > data.iloc[i, 1]:
@@ -84,7 +86,7 @@ class TradingBot:
         return np.array(signals)
         
 
-    def backtest_strategy(self, data):
+    def backtest_strategy(self, symbol):
         """
         Backtests the moving average crossover strategy.
         Returns cumulative returns of the strategy.
@@ -97,33 +99,52 @@ class TradingBot:
             A signal of 0 means no position is taken, so the return is 0.
             .cumsum(): Computes the cumulative sum of the returns over time, reflecting the overall performance of the strategy.
             """
-        signals = self.moving_average_crossover(data)
-        returns = (data['c'].pct_change() * signals).cumsum()
-        return returns
+        execute = 0
+        raw_data = self.alpaca.fetch_raw_data(symbol)
+
+        # Moving Average Crossover
+        signals = self.moving_average_crossover(symbol)
+        returns = (raw_data['c'].pct_change() * signals).cumsum()
+        if returns > 0 : execute += 1
+
+        # Volatility
+        self.backtest_volatility = lambda data, low, high: 1 if low <= (atr := self.calculate_volatility(data)) <= high else -1
+        execute += self.backtest_volatility(data=raw_data, low=2, high=7)
+
+        return execute > 0
 
     
     def execute_trades(self, signal, symbol):
         """
         Execute trades based on the signal. Signal:
-        - 1: Buy
-        - -1: Sell
+        <>  1: Buy
+        <> -1: Sell
         """
         with self.lock:
             self.alpaca.fetch_positions()
             logger.info(f"Processing signal {signal} for {symbol}")
 
             if signal == 1:  # BUY
+                qty = 1
                 logger.info(f"Placing BUY order for {symbol}")
-                self.alpaca.place_order(symbol, qty=1, side="buy")
+                self.alpaca.place_order(symbol, qty=qty, side="buy")
+                # Update Checkbook
+                position = self.alpaca.positions.get(symbol)
+                if position:
+                    self.checkbook[symbol] = position[1]
+
             elif signal == -1:  # SELL
                 logger.info(f"Placing SELL order for {symbol}")
                 self.alpaca.place_order(symbol, qty=1, side="sell")
-            else:
-                logger.info(f"Placing SELL order for {symbol}")
+                #Update Checkbook
+                if symbol in self.checkbook and self.checkbook[symbol]:
+                    sold_price = self.checkbook[symbol].pop(len(self.checkbook[symbol])-1)   
+                    logger.info(f"Sold {symbol} at {sold_price}")
+                    if not self.checkbook[symbol]:  # If the list is now empty
+                        del self.checkbook[symbol]
 
             print(f"Trade for {symbol} completed. Notifying other threads.")
-            threading.Condition(self.lock) #Notify waiting threads that they can now trade   # check if this works
-            
+
     '''
     def evaluate_market_conditions(self, data, symbol):     # lets turn this into a nubmer from 1 to 10, and if it is above 8, it will be considered a highly volatile stock and should be dealt with differently
         """
@@ -165,20 +186,18 @@ class TradingBot:
 
                     if symbol in self.checkbook:
                         buy_price = self.checkbook[symbol]
-                        if current_price < buy_price * .95:
-                            self.execute_trades(-1, symbol=symbol) # sell if it is a loss
-
-                    elif symbol not in self.checkbook:
-                        self.checkbook[symbol] = []                # add new stocks to checkbook
-                    self.checkbook[symbol].append(buy_price)
+                        if current_price < self.calculate_stop_loss(buy_price): # sell if it is a loss
+                            self.execute_trades(-1, symbol=symbol) 
+                        elif self.backtest_strategy(symbol=symbol):             # buy if it is advantageous
+                            if len(self.checkbook[symbol]) <= 10:               # limit number of stocks
+                                self.execute_trades(1,symbol=symbol)   
 
                 await asyncio.sleep(60)
             except Exception as e:
                 logger.error(f"Error monitoring market: {e}")
 
-
-
-    async def forward_to_local_server(self):
+    '''
+        async def forward_to_local_server(self):
         """
         Forward data to the local WebSocket server at ws://localhost:8080.
         """
@@ -208,7 +227,7 @@ class TradingBot:
             logger.error(f"Error connecting to local server: {e}")
         finally:        
             await local_stream.close()
-
+    '''
 
     async def health_check(self):
         """
@@ -243,7 +262,6 @@ class TradingBot:
         tasks = [
             self.safe_task(self.update_live_data),    
             self.safe_task(self.monitor_market),
-            self.safe_task(self.forward_to_local_server),
             self.safe_task(self.purge_queue),
             self.safe_task(self.health_check)
             ]
@@ -267,6 +285,7 @@ class TradingBot:
         true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
         atr = true_range.rolling(14).mean()
         return atr.iloc[-1] #Latest ATR value 
+    
 
         
     def calculate_position_value(self, symbol):
@@ -285,15 +304,6 @@ class TradingBot:
         stop_loss_price = entry_price * (1 - risk_threshold)
         print(f"Stop-loss set to {stop_loss_price}")
         return stop_loss_price
-    
-    def update_averages(self, data, short_window=20, long_window=50):
-        """
-        Updates moving averages and monitors for trend reversals or high volatility.
-        """
-        current_avg = data.iloc[-short_window:].mean().iloc[-1] #last 20 rows...
-        previous_avg = data.iloc[-long_window:].mean() 
-        self.calculate_volatility(current_avg, previous_avg)
-        return current_avg, previous_avg
     
 if __name__ == "__main__":
 
@@ -325,23 +335,9 @@ if __name__ == "__main__":
 """
 To add this additional logic to your bot, we need to integrate conditions for:
 
-Track Buy Price-
-When the bot executes a buy order, store the buy price for the stock.
-Use a dictionary, self.buy_prices, to store the buy prices for each symbol.
-
-Define Sell Conditions-
-If the current price drops below the buy price, execute a sell order.
-Add an optional threshold percentage to trigger an early sell.
-
 Monitor for Rebound/Rebuy Opportunities-
 After selling, watch the stock for an upward trend or percentage recovery from its lowest price.
 If the price rises again, issue a buy signal.
-
-Websocket disconnection-
-now that I have switched how update_live_data works and have moved away from data streams for 
-watching stock values, I think it would be a more effective approach to make use of the data that I already have. 
-For the above things mentioned aswell as the existing classes that involve trading and decision logic.
-I should pull from the current alpaca.positions and evaluate them using thresholds. 
 
 Increase positions-
 One of the most important things that I have to implement is a method to determine whether or not
