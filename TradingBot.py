@@ -8,14 +8,11 @@ import asyncio
 import websockets
 import pandas as pd
 import threading
-import DataStream
-from DataStream import *
 from config import ALPACA_API_KEY
 from config import ALPACA_SECRET_KEY
 import logging
 import sys
 import alpaca_trade_api as trade_api
-import MockDataStream
 from datetime import date
     
 logging.basicConfig(level=logging.INFO)
@@ -32,7 +29,7 @@ class TradingBot:
         self.lock = threading.Lock()
         self.queue = asyncio.Queue(maxsize=1000)  # Queue for sharing data_update output.
         self.datastream = Datastream(datastream_uri) #datastream instance for websockets
-        self.buy_prices = {}  # Track buy prices for symbols # <--- To be Implemented
+        self.checkbook = {}  # Track buy prices for symbols # <--- To be Implemented
 
     def is_market_open(self):
         try:
@@ -48,12 +45,20 @@ class TradingBot:
     async def update_live_data(self):
         while self.running:
             if not self.is_market_open():
-                logger.info("Market is closed. Skipping love data updates...")  
+                logger.info("Market is closed. Skipping live data updates...")  
                 asyncio.sleep(60)  # loop condition, as averse to 'return'
                 continue  
-            self.alpaca.fetch_positions()#add logging to this in case of error. 
             
-    
+            try:
+                # Fetch positions
+                self.alpaca.fetch_positions()
+                logger.info("Fetched positions succesfully")
+            except Exception as e:
+                logger.error(f"Error fetching live data: {e}")
+
+            await asyncio.sleep(30)
+
+
     async def purge_queue(self):
         while self.running:
             try:
@@ -118,31 +123,30 @@ class TradingBot:
 
             print(f"Trade for {symbol} completed. Notifying other threads.")
             threading.Condition(self.lock) #Notify waiting threads that they can now trade   # check if this works
-
             
+    '''
+    def evaluate_market_conditions(self, data, symbol):     # lets turn this into a nubmer from 1 to 10, and if it is above 8, it will be considered a highly volatile stock and should be dealt with differently
+        """
+        Analyze market trends and make action decisions.
+        """
+        short_avg = data['c'].rolling(20).mean().iloc[-1]
+        long_avg = data['c'].rolling(50).mean().iloc[-1]
+        current_price = data['c'].iloc[-1]
+        atr = self.calculate_volatility(data) #incorporate this volatility in the future.
 
-    # def evaluate_market_conditions(self, data, symbol):     # lets turn this into a nubmer from 1 to 10, and if it is above 8, it will be considered a highly volatile stock and should be dealt with differently
-    #     """
-    #     Analyze market trends and make action decisions.
-    #     """
-    #     short_avg = data['c'].rolling(20).mean().iloc[-1]
-    #     long_avg = data['c'].rolling(50).mean().iloc[-1]
-    #     current_price = data['c'].iloc[-1]
-    #     atr = self.calculate_volatility(data) #incorporate this volatility in the future.
+        stop_loss_price = self.calculate_stop_loss(entry_price=current_price, risk_threshold=0.05)
 
-    #     stop_loss_price = self.calculate_stop_loss(entry_price=current_price, risk_threshold=0.05)
-
-    #     # Decision logic
-    #     if short_avg > long_avg and current_price > stop_loss_price:
-    #         return "buy", 1
-    #     if current_price < stop_loss_price:
-    #         return "sell", self.alpaca.positions[symbol]
-    #     elif short_avg < long_avg:
-    #         if symbol in self.alpaca.positions and current_price < (self.alpaca.positions[symbol] * 0.95):
-    #             return "sell", self.alpaca.positions[symbol]
-    #     else:
-    #         return None, 0
-
+        # Decision logic
+        if short_avg > long_avg and current_price > stop_loss_price:
+            return "buy", 1
+        if current_price < stop_loss_price:
+            return "sell", self.alpaca.positions[symbol]
+        elif short_avg < long_avg:
+            if symbol in self.alpaca.positions and current_price < (self.alpaca.positions[symbol] * 0.95):
+                return "sell", self.alpaca.positions[symbol]
+        else:
+            return None, 0
+    '''
 
     async def monitor_market(self):
         """
@@ -150,18 +154,25 @@ class TradingBot:
         """  
         while self.running:
             try:
-                data = await self.queue.get()
-                df = pd.DataFrame(data)
-                for symbol in df['symbol'].unique():  # Iterate over all symbols
-                    symbol_data = df[df['symbol'] == symbol]
-                    symbol_data['ShortAvg'] = symbol_data['c'].rolling(20).mean()
-                    symbol_data['LongAvg'] = symbol_data['c'].rolling(50).mean()
-                    signals = self.moving_average_crossover(symbol_data[['ShortAvg', 'LongAvg']])
-                    if signals[-1] != 0:
-                        self.execute_trades(signals[-1], symbol)
-                    else:
-                        logger.info(f"Holding position for {symbol}.")
-                await asyncio.sleep(60)  # Sleep before processing new data
+                positions = self.alpaca.fetch_positions()         
+                if not positions:
+                    logger.info("No positions to monitor")
+                    asyncio.sleep(60)
+                    continue
+
+                for symbol, (qty,current_price) in positions.items():
+                    logger.info(f"Monitoring {symbol}: qty={qty}, price={current_price}")
+
+                    if symbol in self.checkbook:
+                        buy_price = self.checkbook[symbol]
+                        if current_price < buy_price * .95:
+                            self.execute_trades(-1, symbol=symbol) # sell if it is a loss
+
+                    elif symbol not in self.checkbook:
+                        self.checkbook[symbol] = []                # add new stocks to checkbook
+                    self.checkbook[symbol].append(buy_price)
+
+                await asyncio.sleep(60)
             except Exception as e:
                 logger.error(f"Error monitoring market: {e}")
 
@@ -227,10 +238,10 @@ class TradingBot:
         """
         Starts the bot for all positions.
         """
-        positions = self.alpaca.fetch_positions()
-        symbols = list(positions.keys())
+        #positions = self.alpaca.fetch_positions()
+        #symbols = list(positions.keys())
         tasks = [
-            self.safe_task(self.update_live_data,symbols),    
+            self.safe_task(self.update_live_data),    
             self.safe_task(self.monitor_market),
             self.safe_task(self.forward_to_local_server),
             self.safe_task(self.purge_queue),
@@ -258,11 +269,12 @@ class TradingBot:
         return atr.iloc[-1] #Latest ATR value 
 
         
-    def calculate_position_value(self, symbol, price):
+    def calculate_position_value(self, symbol):
         """
         Calculate the value of a position (quantity * price).
         """
-        qty = self.alpaca.positions.get(symbol, 0)
+        qty = self.alpaca.positions.get(symbol)[0]
+        price = self.alpaca.positions.get(symbol)[1]
         return qty * price * 0.98  # Adjust for slippage
 
 
@@ -326,7 +338,15 @@ After selling, watch the stock for an upward trend or percentage recovery from i
 If the price rises again, issue a buy signal.
 
 Websocket disconnection-
-along with the above, think about the case in which we are disconnected midway. 
-what can we do to prevent/recover from that?
+now that I have switched how update_live_data works and have moved away from data streams for 
+watching stock values, I think it would be a more effective approach to make use of the data that I already have. 
+For the above things mentioned aswell as the existing classes that involve trading and decision logic.
+I should pull from the current alpaca.positions and evaluate them using thresholds. 
+
+Increase positions-
+One of the most important things that I have to implement is a method to determine whether or not
+to buy more stock. I should have pull my portfolio value, my unallocated amount(probably math done by subtracting 
+actively owned stock), and using moving average and something more advanced. Ideally the decision should go through
+about 3 backtests with an affirmative result before a trade is executed
 
 """
