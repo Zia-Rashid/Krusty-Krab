@@ -12,8 +12,9 @@ import sys
 import alpaca_trade_api as trade_api
 from datetime import date
 import BacktestManager
+from BacktestManager import BacktestManager
 from strategies import *
-import Posman
+from Posman import Posman
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)#="TradingBot"
@@ -189,6 +190,7 @@ class TradingBot:
 
 
 if __name__ == "__main__":
+
     
     def signal_handler(signal, frame):
         """
@@ -205,13 +207,15 @@ if __name__ == "__main__":
     # START REAL ********
     alpaca = AlpacaAPI(ALPACA_API_KEY, ALPACA_SECRET_KEY)
     bot = TradingBot(alpaca)
-    bot.__setPosman__ = Posman(bot)
-    bot.__setBacktestManager__ = btm = BacktestManager([
-                                           moving_average_crossover,
-                                               volatility_calculator,
-                                                   mean_reversion_strategy,
-                                                       rsi_strategy
-                                                           ], bot)
+    posman = Posman(bot)
+    bot.__setPosman__(posman)
+    btm = BacktestManager([
+            moving_average_crossover,
+                volatility_calculator,
+                    mean_reversion_strategy,
+                        rsi_strategy
+                            ], bot)
+    bot.__setBacktestManager__(btm)
 
     if not bot.is_market_open():
         logger.info("Market is closed. Exiting bot.")
