@@ -1,11 +1,8 @@
 import signal
-import json
 import numpy as np
-import requests
 import AlpacaAPI
 from AlpacaAPI import *
 import asyncio
-import websockets
 import pandas as pd
 import threading
 from config import ALPACA_API_KEY
@@ -14,14 +11,15 @@ import logging
 import sys
 import alpaca_trade_api as trade_api
 from datetime import date
-#import backtesting
-    
+import BacktestManager
+from strategies import *
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)#="TradingBot"
 logger.setLevel(logging.DEBUG)
 
 class TradingBot:
-    def __init__(self, alpaca_api, datastream_uri):
+    def __init__(self, alpaca_api):
         """
         Initialize TradingBot with Alpaca API keys and create an Alpaca API instance.
         """
@@ -29,7 +27,7 @@ class TradingBot:
         self.running = True
         self.lock = threading.Lock()
         self.queue = asyncio.Queue(maxsize=1000)  # Queue for sharing data_update output.
-        self.datastream = Datastream(datastream_uri) #datastream instance for websockets
+        #self.datastream = Datastream(datastream_uri) #datastream instance for websockets
         self.checkbook = {}  # Track buy prices for symbols # <--- To be Implemented
 
     def is_market_open(self):
@@ -68,50 +66,29 @@ class TradingBot:
                 await asyncio.sleep(60)  # Run every 60 seconds
             except Exception as e:
                 logger.error(f"Error purging queue: {e}")
-
-               
-    def moving_average_crossover(self, symbol):
-        """
-        Strategy: Generate buy (1) and sell (-1) signals based on moving average crossover.
-        """
-        data = self.alpaca.fetch_historical_data(symbol, "2024-10-01")
-        signals = []
-        for i in range(len(data)):
-            if data.iloc[i, 0] > data.iloc[i, 1]:
-                signals.append(1)  # BUY signal
-            elif data.iloc[i, 0] < data.iloc[i, 1]:
-                signals.append(-1)  # SELL signal
-            else:
-                signals.append(0)  # No signal
-        return np.array(signals)
         
 
     def backtest_strategy(self, symbol):
         """
-        Backtests the moving average crossover strategy.
-        Returns cumulative returns of the strategy.
+        Backtests market conditions to make trade decisions
         """
-        """ 
-        This provides the actual daily return for the asset.
-            * signals: Multiplies the daily return by the corresponding signal to apply the trading strategy:
-            A signal of 1 means you profit (or lose) based on the price movement.
-            A signal of -1 means you gain if the price falls (short-selling).
-            A signal of 0 means no position is taken, so the return is 0.
-            .cumsum(): Computes the cumulative sum of the returns over time, reflecting the overall performance of the strategy.
-            """
-        execute = 0
-        raw_data = self.alpaca.fetch_raw_data(symbol)
+        btm = BacktestManager()
+        raw_data = pd.Series(self.alpaca.fetch_raw_data(symbol))
+        portfolio_value = self.alpaca.calculate_portfolio_value()
+        available_cash = self.available_funds()
 
-        # Moving Average Crossover
-        signals = self.moving_average_crossover(symbol)
-        returns = (raw_data['c'].pct_change() * signals).cumsum()
-        if returns > 0 : execute += 1
+        btm.add_strategy(moving_average_crossover)
+        btm.add_strategy(volatility_calculator)
+        btm.add_strategy(mean_reversion_strategy)
+        btm.add_strategy(macd_strategy)
+        btm.add_strategy(rsi_strategy)
+        btm.add_strategy(lambda symbol, data: self.position_sizing_strategy(symbol, portfolio_value, available_cash))
 
-        # Volatility
-        self.backtest_volatility = lambda data, low, high: 1 if low <= (atr := self.calculate_volatility(data)) <= high else -1
-        execute += self.backtest_volatility(data=raw_data, low=2, high=7)
+        logger.info(f"Running backtest strategies for {symbol}...")
+        decision = btm.execute_strategies(symbol, raw_data)
 
-        return execute > 0
+        logger.info(f"Backtest result for {symbol}: {decision}")
+        return decision > len(btm.strategies - 1 // 2)
 
     
     def execute_trades(self, signal, symbol):
@@ -272,29 +249,35 @@ class TradingBot:
         try:
             await func(*args)
         except Exception as e:
-            logger.error(f"Error in {func.__name__}: {e}")
+            logger.error(f"Error in {func.__name__}: {e}")  
 
 
-    def calculate_volatility(self, data):
-        """
-        Calculate Average True Range (ATR) to measure volatility.
-        """
-        high_low = data['h'] - data['l']
-        high_close = abs(data['h'] - data['c'].shift(1))
-        low_close = abs(data['l'] - data['c'].shift(1))
-        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        atr = true_range.rolling(14).mean()
-        return atr.iloc[-1] #Latest ATR value 
-    
-
+    def available_funds(self):
+        cash = self.alpaca.calculate_portfolio_value()
+        positions = self.alpaca.fetch_positions()
+        for symbol in positions:
+            cash -= self.calculate_position_value(symbol=symbol)
+        return cash
         
+
     def calculate_position_value(self, symbol):
         """
         Calculate the value of a position (quantity * price).
         """
         qty = self.alpaca.positions.get(symbol)[0]
         price = self.alpaca.positions.get(symbol)[1]
-        return qty * price * 0.98  # Adjust for slippage
+        return qty * price  # Adjust for slippage
+    
+    def position_sizing_strategy(self, symbol, portfolio_value, available_cash, max_position_size=0.10):
+        """
+        Ensures no single position exceeds a defined percentage of the portfolio.
+        """
+        position_value = self.calculate_position_value(symbol)
+        max_allocation = portfolio_value * max_position_size
+
+        if position_value > max_allocation or available_cash < position_value:
+            return -1  # Don't add to position
+        return 0  # Neutral
 
 
     def calculate_stop_loss(self, entry_price, risk_threshold=0.05):
@@ -305,14 +288,13 @@ class TradingBot:
         print(f"Stop-loss set to {stop_loss_price}")
         return stop_loss_price
     
-if __name__ == "__main__":
 
+if __name__ == "__main__":
+    
     async def signal_handler(signal, frame):
         bot.running = False
         logger.info("Shutting down the bot...")
-        #bot.datastream.close()
         print(f"Portfolio value: {bot.alpaca.calculate_portfolio_value()}")
-        await asyncio.run(bot.datastream.close())
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -320,16 +302,13 @@ if __name__ == "__main__":
 
     # START REAL ********
     alpaca = AlpacaAPI(ALPACA_API_KEY, ALPACA_SECRET_KEY)
-    datastream_uri = "wss://paper-api.alpaca.markets/stream"
-    bot = TradingBot(alpaca, datastream_uri)
-    asyncio.run(bot.datastream.connect())
+    bot = TradingBot(alpaca)
 
     if not bot.is_market_open():
         logger.info("Market is closed. Exiting bot.")
         exit()
 
     asyncio.run(bot.run())
-    print("In main(), post run()")
     # END REAL **********
 
 """
