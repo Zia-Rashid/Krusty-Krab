@@ -1,6 +1,10 @@
 import numpy as np
 import pandas as pd
+import logging
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("BackTestManager")#="TradingBot"
+logger.setLevel(logging.INFO)
 
 class BacktestManager:
 
@@ -14,14 +18,14 @@ class BacktestManager:
         """
         self.strategies.append(strategy)
 
-    def execute_strategies(self, symbol, data):
+    def execute_strategies(self, symbol, data):     
         """
         Runs all backtesting strategies and returns the net decision score.
         """
-        for strategy in self.strategies:
-            result = strategy(symbol, data)
-            self.main_bot.logger.info(f"Strategy: {strategy.__name__}, Symbol: {symbol}, Result: {result}") # may or may not cause errors LOL
-        return sum(result)        
+        logger.debug(f"Running backtesting strategies")
+        decision_score = sum(strategy(symbol, data) for strategy in self.strategies)
+        return decision_score
+
 
 
 

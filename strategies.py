@@ -1,4 +1,11 @@
-def moving_average_crossover(self, symbol, data):
+import pandas as pd
+import numpy as np
+import TradingBot as bot
+# import AlpacaAPI as alpaca
+# from AlpacaAPI import *
+
+
+def moving_average_crossover(symbol, data):
         """
         Strategy: Generate buy (1) and sell (-1) signals based on moving average crossover.
         """
@@ -10,7 +17,12 @@ def moving_average_crossover(self, symbol, data):
             A signal of 0 means no position is taken, so the return is 0.
             .cumsum(): Computes the cumulative sum of the returns over time, reflecting the overall performance of the strategy.
             """
-        data = self.alpaca.fetch_historical_data(symbol, "2024-10-01")
+        #data = alpaca.fetch_historical_data(symbol, "2024-10-01")
+
+        if data.empty or 'close' not in data.columns:
+            print("Data for moving average crossover is missing or incomplete.")
+            return 0 
+
         signals = []
         for i in range(len(data)):
             if data.iloc[i, 0] > data.iloc[i, 1]:
@@ -20,8 +32,8 @@ def moving_average_crossover(self, symbol, data):
             else:
                 signals.append(0)  # No signal
         result = np.array(signals)
-        returns = (data['c'].pct_change() * result).cumsum()
-        return 1 if returns > 0 else -1
+        returns = (data['close'].pct_change() * result).cumsum()
+        return 1 if returns.iloc[-1] > 0 else -1
 
 
 ####
@@ -30,33 +42,34 @@ def mean_reversion_strategy(symbol, data, threshold=0.02):
     """
     Mean reversion strategy based on Bollinger Bands.
     """
-    sma = data['c'].rolling(window=20).mean()
-    std_dev = data['c'].rolling(window=20).std()
+    sma = data['close'].rolling(window=20).mean()
+    std_dev = data['close'].rolling(window=20).std()
     upper_band = sma + (2 * std_dev)
     lower_band = sma - (2 * std_dev)
 
-    if data['c'].iloc[-1] > upper_band.iloc[-1]:
+    if data['close'].iloc[-1] > upper_band.iloc[-1]:
         return -1  # Sell
-    elif data['c'].iloc[-1] < lower_band.iloc[-1]:
+    elif data['close'].iloc[-1] < lower_band.iloc[-1]:
         return 1  # Buy
     return 0  # No action
  
 
 #####
 
-def __calculate_volatility__(self, data):
+def __calculate_volatility__(data):
         """
         Calculate Average True Range (ATR) to measure volatility.
         """
-        high_low = data['h'] - data['l']
-        high_close = abs(data['h'] - data['c'].shift(1))
-        low_close = abs(data['l'] - data['c'].shift(1))
+        print(data)
+        high_low = data['high'] - data['low']
+        high_close = abs(data['high'] - data['close'].shift(1))
+        low_close = abs(data['low'] - data['close'].shift(1))
         true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
         atr = true_range.rolling(14).mean()
         return atr.iloc[-1] #Latest ATR value 
 def volatility_calculator(self, data):        
-    self.backtest_volatility = lambda data, low, high: 1 if low <= (atr := self.calculate_volatility(data)) <= high else -1
-    return self.backtest_volatility(data=data, low=2, high=7) 
+    backtest_volatility = lambda data, low, high: 1 if low <= (atr := __calculate_volatility__(data)) <= high else -1
+    return backtest_volatility(data=data, low=2, high=7) 
 
 ####
 
@@ -64,8 +77,8 @@ def macd_strategy(symbol, data):
     """
     MACD strategy for buy/sell signals based on moving averages.
     """
-    ema12 = data['c'].ewm(span=12, adjust=False).mean()
-    ema26 = data['c'].ewm(span=26, adjust=False).mean()
+    ema12 = data['close'].ewm(span=12, adjust=False).mean()
+    ema26 = data['close'].ewm(span=26, adjust=False).mean()
     macd = ema12 - ema26
     signal = macd.ewm(span=9, adjust=False).mean()
 
@@ -81,7 +94,7 @@ def rsi_strategy(symbol, data, overbought=70, oversold=30):
     """
     RSI strategy to identify overbought or oversold conditions.
     """
-    delta = data['c'].diff()
+    delta = data['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
     rs = gain / loss
