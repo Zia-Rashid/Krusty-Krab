@@ -19,12 +19,14 @@ class BacktestManager:
         self.strategies.append(strategy)
 
     def execute_strategies(self, symbol, data):     
-        """
-        Runs all backtesting strategies and returns the net decision score.
-        """
-        logger.debug(f"Running backtesting strategies")
-        decision_score = sum(strategy(symbol, data) for strategy in self.strategies)
-        return decision_score
+        logger.debug(f"Running backtesting strategies for {symbol}")
+        total_score = 0
+        for strategy in self.strategies:
+            result = strategy(symbol, data)
+            print(f"Strategy {strategy.__name__} returned {result} for {symbol}")
+            total_score += result
+        return total_score
+
 
 
 

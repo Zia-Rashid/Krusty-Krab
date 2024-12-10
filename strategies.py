@@ -1,8 +1,12 @@
 import pandas as pd
 import numpy as np
 import TradingBot as bot
+import logging
 # import AlpacaAPI as alpaca
 # from AlpacaAPI import *
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("Strategies")#="TradingBot"
+logger.setLevel(logging.INFO)
 
 
 def moving_average_crossover(symbol, data):
@@ -57,19 +61,23 @@ def mean_reversion_strategy(symbol, data, threshold=0.02):
 #####
 
 def __calculate_volatility__(data):
-        """
-        Calculate Average True Range (ATR) to measure volatility.
-        """
-        print(data)
-        high_low = data['high'] - data['low']
-        high_close = abs(data['high'] - data['close'].shift(1))
-        low_close = abs(data['low'] - data['close'].shift(1))
-        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        atr = true_range.rolling(14).mean()
-        return atr.iloc[-1] #Latest ATR value 
-def volatility_calculator(self, data):        
-    backtest_volatility = lambda data, low, high: 1 if low <= (atr := __calculate_volatility__(data)) <= high else -1
-    return backtest_volatility(data=data, low=2, high=7) 
+    if len(data) < 14:  # Ensure at least 14 rows for the rolling calculation
+        logger.warning("Insufficient data for volatility calculation.")
+        return float('nan')
+    high_low = data['high'] - data['low']
+    high_close = abs(data['high'] - data['close'].shift(1))
+    low_close = abs(data['low'] - data['close'].shift(1))
+    true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr = true_range.rolling(14).mean()
+    return atr.iloc[-1]  # Latest ATR value
+
+def volatility_calculator(self, data):
+    atr = __calculate_volatility__(data)
+    if pd.isna(atr):  # Handle cases where ATR cannot be calculated
+        logger.warning("ATR calculation failed. Returning -1.")
+        return -1
+    low, high = data['high'].min() * 0.01, data['high'].max() * 0.05  # Example dynamic bounds
+    return 1 if low <= atr <= high else -1
 
 ####
 

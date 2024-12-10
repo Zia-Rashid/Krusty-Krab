@@ -1,3 +1,4 @@
+import datetime
 import signal
 import numpy as np
 import AlpacaAPI
@@ -10,7 +11,7 @@ from config import ALPACA_SECRET_KEY
 import logging
 import sys
 import alpaca_trade_api as trade_api
-from datetime import date
+from datetime import date, timezone, datetime
 import BacktestManager
 from BacktestManager import BacktestManager
 from strategies import *
@@ -19,6 +20,10 @@ from Posman import Posman
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TradingBot")#="TradingBot"
 logger.setLevel(logging.INFO)
+
+#debug_mode = False  # Set to True for detailed logs
+#logger.setLevel(logging.DEBUG if debug_mode else logging.WARNING)
+
 
 # file_handler = logging.FileHandler('/var/log/tradingbot.activity')
 # file_handler.setLevel(logging.INFO)
@@ -109,17 +114,20 @@ class TradingBot:
                             # in the future change htis to the price that it was yesterday or 
                             # maybe a week ago and I should have logic that tracks the symbol to 
                             # see if the value starts to turn around and i should rebuy it.
+                            #print("Selling")
                             try:
                                 self.execute_trades(-1, symbol=symbol) 
                             except Exception as e:
                                 logger.error(f"Error placing SELL order for {symbol}: {e}")
                         elif self.backtest_strategy(symbol=symbol):             # buy if it is advantageous
+                            #print("Buying)")
                             logger.debug(f"Running backtest for {symbol} with price {current_price} and buy price {self.alpaca.checkbook[symbol]}")
                             try:
                                 self.execute_trades(1, symbol=symbol) 
                             except Exception as e:
                                 logger.error(f"Error placing BUY order for {symbol}: {e}")
                         else:
+                            print("Skipping\n")
                             continue
                     else:
                         logger.warning(f"{symbol} not found in checkbook during monitoring.")
@@ -147,22 +155,10 @@ class TradingBot:
             logger.error(f"Error in backtest_strategy: {e}")
             return False
         
-        portfolio_value = self.alpaca.calculate_portfolio_value()
-        available_cash = self.posman.available_funds()
-
-        self.btm.add_strategy(moving_average_crossover)
-        self.btm.add_strategy(volatility_calculator)
-        self.btm.add_strategy(mean_reversion_strategy)
-        self.btm.add_strategy(macd_strategy)
-        self.btm.add_strategy(rsi_strategy)
-        self.btm.add_strategy(lambda symbol, data: self.posman.position_sizing_strategy(symbol, portfolio_value, available_cash))
-
         logger.info(f"Running backtest strategies for {symbol}...")
         decision = btm.execute_strategies(symbol, raw_data)
-
-        logger.info(f"Backtest result for {symbol}: {decision}")
-        return decision > len(btm.strategies) // 2
-    
+        logger.info(f"Backtest result for {symbol} at {datetime.now()}: -BUY- {decision}") if decision > (len(btm.strategies) // 2) else logger.info(f"Backtest result for {symbol} at {datetime.now()}: -HOLD- {decision}")
+        return decision > (len(btm.strategies) // 2)
 
     def execute_trades(self, signal, symbol):
         """
@@ -237,12 +233,16 @@ if __name__ == "__main__":
     bot = TradingBot(alpaca)
     posman = Posman(bot)
     bot.__setPosman__(posman)
+    portfolio_value = bot.alpaca.calculate_portfolio_value()
+    available_cash = bot.posman.available_funds()
     btm = BacktestManager([
             moving_average_crossover,
                 volatility_calculator,
-                    mean_reversion_strategy,
-                        rsi_strategy
-                            ], bot)
+                    macd_strategy,
+                        mean_reversion_strategy,
+                            rsi_strategy,
+                                (lambda symbol, data: bot.posman.position_sizing_strategy(symbol, portfolio_value, available_cash))
+                                    ], bot)
     bot.__setBacktestManager__(btm)
 
     if not bot.is_market_open():

@@ -74,7 +74,7 @@ class AlpacaAPI:
                 end=end_date,
                 adjustment='all'
             ).df
-            logging.info(f"Data retrieved: {bars.tail()}")
+            logging.info(f"Data retrieved: {bars.tail(3)}")
             return bars
         except Exception as e:
             logger.error(f"Error fetching historical data for {symbol}: {e}")
