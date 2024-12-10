@@ -37,5 +37,5 @@ class Posman:
         Calculate stop-loss price based on entry price and risk threshold.
         """
         stop_loss_price = entry_price * (1 - risk_threshold)
-        print(f"Stop-loss set to {stop_loss_price}")
+        #print(f"Stop-loss set to {stop_loss_price}")
         return stop_loss_price

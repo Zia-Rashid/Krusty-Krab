@@ -110,7 +110,7 @@ class TradingBot:
 
                     if symbol in self.alpaca.checkbook:
                         buy_price = self.alpaca.checkbook[symbol]
-                        if current_price < self.posman.calculate_stop_loss(buy_price): # sell if it is a loss
+                        if current_price < self.posman.calculate_stop_loss(buy_price) or current_price > buy_price * 2.5: # sell if it is a loss
                             # in the future change htis to the price that it was yesterday or 
                             # maybe a week ago and I should have logic that tracks the symbol to 
                             # see if the value starts to turn around and i should rebuy it.
@@ -231,6 +231,7 @@ if __name__ == "__main__":
     # START REAL ********
     alpaca = AlpacaAPI(ALPACA_API_KEY, ALPACA_SECRET_KEY)
     bot = TradingBot(alpaca)
+    bot.alpaca.populate_checkbook()
     posman = Posman(bot)
     bot.__setPosman__(posman)
     portfolio_value = bot.alpaca.calculate_portfolio_value()

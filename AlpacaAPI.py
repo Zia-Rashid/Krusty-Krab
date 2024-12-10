@@ -1,5 +1,5 @@
 import alpaca_trade_api as tradeapi
-from alpaca_trade_api.rest import TimeFrame
+from alpaca_trade_api.rest import TimeFrame, REST
 from datetime import date, timedelta
 import logging
 import pandas as pd
@@ -18,6 +18,28 @@ class AlpacaAPI:
         self.positions = {}
         self.checkbook = {}  # Track buy prices for symbols # <--- To be Implemented
 
+    def populate_checkbook(self):
+        """
+        Fetch past buy orders and populate the checkbook with the buy price.
+        """
+        try:
+            # Fetch all closed orders (or you can adjust with time range/limit)
+            orders = self.api.list_orders(status='filled', limit=500)  # Adjust 'limit' as needed
+
+            for order in orders:
+                # Only process buy orders
+                if order.side == 'buy' and order.filled_avg_price:
+                    symbol = order.symbol
+                    buy_price = float(order.filled_avg_price)
+
+                    # Add to checkbook if not already added
+                    if symbol not in self.checkbook:
+                        self.checkbook[symbol] = buy_price
+                        logging.info(f"Added {symbol} to checkbook with buy price {buy_price}")
+
+        except Exception as e:
+            logging.error(f"Error populating checkbook: {e}")
+
     def fetch_positions(self):
         """
         Fetch current positions from Alpaca API.
@@ -25,15 +47,8 @@ class AlpacaAPI:
         try:
             positions = self.api.list_positions()
             self.positions = {pos.symbol: [int(pos.qty), float(pos.current_price)] for pos in positions}
-
-            for pos in positions:
-                symbol = pos.symbol
-                current_price = float(pos.current_price)
-                if symbol not in self.checkbook:
-                    self.checkbook[symbol] = current_price
-                    logger.info(f"Added {symbol} to checkbook with price {current_price}")
-
             return self.positions
+        
         except tradeapi.rest.APIError as e:
             raise Exception(f"Error fetching positions: {e}")
 

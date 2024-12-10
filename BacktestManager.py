@@ -23,7 +23,7 @@ class BacktestManager:
         total_score = 0
         for strategy in self.strategies:
             result = strategy(symbol, data)
-            print(f"Strategy {strategy.__name__} returned {result} for {symbol}")
+            # print(f"Strategy {strategy.__name__} returned {result} for {symbol}")
             total_score += result
         return total_score
 
