@@ -85,7 +85,7 @@ class TradingBot:
             try:
                 # Fetch positions
                 self.alpaca.fetch_positions()
-                logger.info("Fetched positions succesfully")
+                logger.info("Fetched positions succesfully\n")
             except Exception as e:
                 logger.error(f"Error fetching live data: {e}")
 
@@ -111,6 +111,8 @@ class TradingBot:
                     if symbol in self.alpaca.checkbook:
                         buy_price = self.alpaca.checkbook[symbol]
                         if current_price < self.posman.calculate_stop_loss(buy_price) or current_price > buy_price * 2.5: # sell if it is a loss
+                            """***********************************************************************************************************
+                            ***********************************************************************************************************"""
                             # in the future change htis to the price that it was yesterday or 
                             # maybe a week ago and I should have logic that tracks the symbol to 
                             # see if the value starts to turn around and i should rebuy it.
@@ -132,7 +134,6 @@ class TradingBot:
                     else:
                         logger.warning(f"{symbol} not found in checkbook during monitoring.")
                            
-
                 await asyncio.sleep(60)
             except Exception as e:
                 logger.error(f"Error monitoring market: {e}")
@@ -142,23 +143,16 @@ class TradingBot:
         """
         Backtests market conditions to make trade decisions
         """
-        #raw_data = pd.Series(self.alpaca.fetch_raw_data(symbol))
-        try:
-            raw_data = self.alpaca.fetch_historical_data(symbol,"2024-10-01")
-            if raw_data.empty:
-                logger.warning(f"No historical data for {symbol}.")
-                return False
-            if not {'close', 'high', 'low'}.issubset(raw_data.columns):
-                raise ValueError("Required columns ('close', 'high', 'low') are missing in data.")
-
-        except Exception as e:
-            logger.error(f"Error in backtest_strategy: {e}")
+        raw_data = self.alpaca.fetch_historical_data(symbol,"2024-10-01")
+        if raw_data.empty:
+            logger.warning(f"No historical data for {symbol}.")
             return False
         
-        logger.info(f"Running backtest strategies for {symbol}...")
-        decision = btm.execute_strategies(symbol, raw_data)
-        logger.info(f"Backtest result for {symbol} at {datetime.now()}: -BUY- {decision}") if decision > (len(btm.strategies) // 2) else logger.info(f"Backtest result for {symbol} at {datetime.now()}: -HOLD- {decision}")
-        return decision > (len(btm.strategies) // 2)
+        decision_score = btm.execute_strategies(symbol, raw_data)
+        logger.info(f"Backtest result for {symbol} at {datetime.now()}: Score={decision_score:.2f}")
+        
+        return decision_score > 0.3
+
 
     def execute_trades(self, signal, symbol):
         """
@@ -237,12 +231,12 @@ if __name__ == "__main__":
     portfolio_value = bot.alpaca.calculate_portfolio_value()
     available_cash = bot.posman.available_funds()
     btm = BacktestManager([
-            moving_average_crossover,
-                volatility_calculator,
-                    macd_strategy,
-                        mean_reversion_strategy,
-                            rsi_strategy,
-                                (lambda symbol, data: bot.posman.position_sizing_strategy(symbol, portfolio_value, available_cash))
+            (moving_average_crossover, 1.5),
+                (volatility_calculator,1.0),
+                    (macd_strategy,1.2),
+                        (mean_reversion_strategy,1.3),
+                            (rsi_strategy,1.0),
+                                ((lambda symbol, data: bot.posman.position_sizing_strategy(symbol, portfolio_value, available_cash)),1.4)
                                     ], bot)
     bot.__setBacktestManager__(btm)
 

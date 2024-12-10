@@ -18,17 +18,14 @@ class BacktestManager:
         """
         self.strategies.append(strategy)
 
-    def execute_strategies(self, symbol, data):     
+    def execute_strategies(self, symbol, data):
         logger.debug(f"Running backtesting strategies for {symbol}")
         total_score = 0
-        for strategy in self.strategies:
+        total_weight = 0
+        
+        for strategy, weight in self.strategies:
             result = strategy(symbol, data)
-            # print(f"Strategy {strategy.__name__} returned {result} for {symbol}")
-            total_score += result
-        return total_score
-
-
-
-
-
-    
+            total_score += result * weight
+            total_weight += weight
+        
+        return total_score / total_weight if total_weight > 0 else 0
