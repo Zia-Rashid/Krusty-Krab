@@ -110,13 +110,7 @@ class TradingBot:
 
                     if symbol in self.alpaca.checkbook:
                         buy_price = self.alpaca.checkbook[symbol]
-                        if current_price < self.posman.calculate_stop_loss(buy_price) or current_price > buy_price * 2.5: # sell if it is a loss
-                            """***********************************************************************************************************
-                            ***********************************************************************************************************"""
-                            # in the future change htis to the price that it was yesterday or 
-                            # maybe a week ago and I should have logic that tracks the symbol to 
-                            # see if the value starts to turn around and i should rebuy it.
-                            #print("Selling")
+                        if current_price < self.posman.calculate_stop_loss(buy_price) or mean_reversion_strategy(symbol=symbol) > 75 or self.calculate_trailing_stop(current_price=current_price):
                             try:
                                 self.execute_trades(-1, symbol=symbol) 
                             except Exception as e:
@@ -151,7 +145,7 @@ class TradingBot:
         decision_score = btm.execute_strategies(symbol, raw_data)
         logger.info(f"Backtest result for {symbol} at {datetime.now()}: Score={decision_score:.2f}")
         
-        return decision_score > 0.3
+        return decision_score > 0.25
 
 
     def execute_trades(self, signal, symbol):
@@ -183,7 +177,34 @@ class TradingBot:
 
             print(f"Trade for {symbol} completed. Notifying other threads.")
 
+    async def evaluate_rebuy_opportunities(self):
+        """
+        Checks recently sold positions for an oppurtune buy back
+        """
+        while self.running:
+            try:
+                for symbol, details in list(self.alpaca.sold_book.items()):
+                    sell_price = details['sell_price']
+                    timestamp = details['timestamp']
 
+                    # Fetch current price
+                    current_price = self.alpaca.fetch_raw_data(symbol)
+                    if current_price and current_price < sell_price * 0.95 and self.backtest_strategy(symbol=symbol): 
+                        logger.info(f"Rebuying {symbol} at {current_price} (sold at {sell_price})")
+                        self.execute_trades(1, symbol=symbol)
+                        del self.alpaca.sold_book[symbol]  # Remove from sold_book after rebuy
+                await asyncio.sleep(300)  # Check every 5 minutes
+            except Exception as e:
+                logger.error(f"Error evaluating rebuy opportunities: {e}")
+
+    def calculate_trailing_stop(self, current_price):
+        """ Part of the sell logic, 
+            will sell if stock dips below peak to maximize gains, 
+            hopefully to be rebought in the future """
+        max_price = self.posman.calculate_stop_loss(current_price)# default .05 risk threshold
+        return max_price
+
+    
     async def run(self):
         """
         Starts the bot for all positions.
@@ -193,6 +214,7 @@ class TradingBot:
         tasks = [
             self.safe_task(self.update_live_data),    
             self.safe_task(self.monitor_market),
+            self.safe_task(self.evaluate_rebuy_opportunities),
             ]
         await asyncio.gather(*tasks)
 
@@ -226,6 +248,7 @@ if __name__ == "__main__":
     alpaca = AlpacaAPI(ALPACA_API_KEY, ALPACA_SECRET_KEY)
     bot = TradingBot(alpaca)
     bot.alpaca.populate_checkbook()
+    bot.alpaca.populate_sold_book()
     posman = Posman(bot)
     bot.__setPosman__(posman)
     portfolio_value = bot.alpaca.calculate_portfolio_value()
@@ -234,8 +257,8 @@ if __name__ == "__main__":
             (moving_average_crossover, 1.5),
                 (volatility_calculator,1.0),
                     (macd_strategy,1.2),
-                        (mean_reversion_strategy,1.3),
-                            (rsi_strategy,1.0),
+                        (mean_reversion_strategy,1.2),
+                            (rsi_strategy,1.1),
                                 ((lambda symbol, data: bot.posman.position_sizing_strategy(symbol, portfolio_value, available_cash)),1.4)
                                     ], bot)
     bot.__setBacktestManager__(btm)

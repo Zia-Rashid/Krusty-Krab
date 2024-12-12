@@ -15,8 +15,9 @@ class AlpacaAPI:
         Alpaca API wrapper for trading and data fetching using alpaca-trade-api.
         """
         self.api = tradeapi.REST(api_key, secret_key, base_url)
-        self.positions = {}
-        self.checkbook = {}  # Track buy prices for symbols # <--- To be Implemented
+        self.positions = {}  # Track current stocks
+        self.checkbook = {}  # Track buy prices
+        self.sold_book = {}  # History sold symbols
 
     def populate_checkbook(self):
         """
@@ -39,6 +40,21 @@ class AlpacaAPI:
 
         except Exception as e:
             logging.error(f"Error populating checkbook: {e}")
+
+
+    def populate_sold_book(self):
+        """
+        Populate sold_book with past sell transactions.
+        """
+        transactions = self.fetch_all_transactions()
+        for txn in transactions:
+            if txn['side'] == 'sell' and txn['price'] is not None:
+                self.sold_book[txn['symbol']] = {
+                    'sell_price': txn['price'],
+                    'timestamp': txn['timestamp']
+                }
+                logging.info(f"Added {txn['symbol']} to sold_book with price {txn['price']}")
+
 
     def fetch_positions(self):
         """
@@ -95,11 +111,32 @@ class AlpacaAPI:
             logger.error(f"Error fetching historical data for {symbol}: {e}")
             raise
     
-    def fetch_raw_data(self, symbol):
+    def fetch_raw_data(self, symbol): #In the future consider a similar class that fetches data for the entire market and have it as a par tof update_live_data
         """
         Fetches all of the current data
         """
         return self.api.get_latest_bar(symbol=symbol, feed='iex')
+    
+    def fetch_all_transactions(self, status='filled', limit=200):
+        """
+        Fetch all filled transactions from Alpaca.
+        """
+        try:
+            orders = self.api.list_orders(status=status, limit=limit)
+            transaction_data = []
+            for order in orders:
+                transaction_data.append({
+                    'symbol': order.symbol,
+                    'side': order.side,
+                    'price': float(order.filled_avg_price) if order.filled_avg_price else None,
+                    'qty': int(order.filled_qty) if order.filled_qty else None,
+                    'timestamp': order.filled_at
+                })
+            return transaction_data
+        except Exception as e:
+            logger.error(f"Error fetching transactions: {e}")
+            return []
+
 
     def is_market_open(self):
         """
