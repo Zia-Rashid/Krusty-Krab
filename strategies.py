@@ -109,8 +109,10 @@ def rsi_strategy(symbol, data, overbought=70, oversold=30):
     rsi = 100 - (100 / (1 + rs))
 
     if rsi.iloc[-1] < oversold:
+        #print(rsi.iloc[-1])
         return 1  # Buy
     elif rsi.iloc[-1] > overbought:
+        #print(rsi.iloc[-1])
         return -1  # Sell
     return 0  # No action
  

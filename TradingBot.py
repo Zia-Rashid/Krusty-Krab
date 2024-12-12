@@ -89,7 +89,7 @@ class TradingBot:
             except Exception as e:
                 logger.error(f"Error fetching live data: {e}")
 
-            await asyncio.sleep(30)
+            await asyncio.sleep(15)
     
 
     async def monitor_market(self):
@@ -105,19 +105,32 @@ class TradingBot:
                     asyncio.sleep(60)
                     continue
 
-                for symbol, (qty,current_price) in positions.items():
-                    logger.info(f"Monitoring {symbol}: qty={qty}, price={current_price}")
+                for symbol, position_data in positions.items():
+
+                    qty = int(position_data['qty'])
+                    current_price = float(position_data['current_price'])
+                    mrkt_price = float(position_data['market_price'])
+
+                    logger.info(f"Monitoring {symbol}: qty={qty}, price={mrkt_price}")
 
                     if symbol in self.alpaca.checkbook:
-                        buy_price = self.alpaca.checkbook[symbol]
-                        if current_price < self.posman.calculate_stop_loss(buy_price) or mean_reversion_strategy(symbol=symbol) > 75 or self.calculate_trailing_stop(current_price=current_price):
+                        buy_price = self.alpaca.checkbook[symbol][-1]
+                        data = self.alpaca.fetch_historical_data(symbol, "2024-10-01")
+
+                        backtest = self.backtest_strategy(symbol=symbol)
+
+                        if mrkt_price < self.posman.calculate_stop_loss(buy_price) or backtest <-.45 or self.calculate_trailing_stop(symbol=symbol):#cahgne trailing stop to be open price
+                            print(f"mrkt_price < buy_price: {mrkt_price < self.posman.calculate_stop_loss(buy_price)}")
+                            print(f"Backtesting: {backtest}")
+                            print(f"trailing_stop: {self.calculate_trailing_stop(symbol=symbol)}")
                             try:
-                                self.execute_trades(-1, symbol=symbol) 
+                                self.execute_trades(-1, symbol=symbol)
+                                self.alpaca.fetch_positions()
                             except Exception as e:
                                 logger.error(f"Error placing SELL order for {symbol}: {e}")
-                        elif self.backtest_strategy(symbol=symbol):             # buy if it is advantageous
-                            #print("Buying)")
-                            logger.debug(f"Running backtest for {symbol} with price {current_price} and buy price {self.alpaca.checkbook[symbol]}")
+                        elif backtest > 0.25:             # buy if it is advantageous
+                            print("Buying")
+                            logger.debug(f"Running backtest for {symbol} with price {mrkt_price} and buy price {self.alpaca.checkbook[symbol]}")
                             try:
                                 self.execute_trades(1, symbol=symbol) 
                             except Exception as e:
@@ -126,7 +139,7 @@ class TradingBot:
                             print("Skipping\n")
                             continue
                     else:
-                        logger.warning(f"{symbol} not found in checkbook during monitoring.")
+                        logger.warning(f"{symbol} not found in checkbook during monitoring.\n")
                            
                 await asyncio.sleep(60)
             except Exception as e:
@@ -145,7 +158,7 @@ class TradingBot:
         decision_score = btm.execute_strategies(symbol, raw_data)
         logger.info(f"Backtest result for {symbol} at {datetime.now()}: Score={decision_score:.2f}")
         
-        return decision_score > 0.25
+        return decision_score 
 
 
     def execute_trades(self, signal, symbol):
@@ -175,7 +188,8 @@ class TradingBot:
                 if symbol in self.alpaca.checkbook:
                     del self.alpaca.checkbook[symbol]
 
-            print(f"Trade for {symbol} completed. Notifying other threads.")
+            print(f"Trade for {symbol} completed. Notifying other threads.\n")
+
 
     async def evaluate_rebuy_opportunities(self):
         """
@@ -188,8 +202,9 @@ class TradingBot:
                     timestamp = details['timestamp']
 
                     # Fetch current price
-                    current_price = self.alpaca.fetch_raw_data(symbol)
-                    if current_price and current_price < sell_price * 0.95 and self.backtest_strategy(symbol=symbol): 
+                    data = self.alpaca.fetch_positions()
+                    current_price = data[symbol]['market_price']
+                    if current_price and current_price < sell_price * 0.95 and self.backtest_strategy(symbol=symbol) > 0.25: 
                         logger.info(f"Rebuying {symbol} at {current_price} (sold at {sell_price})")
                         self.execute_trades(1, symbol=symbol)
                         del self.alpaca.sold_book[symbol]  # Remove from sold_book after rebuy
@@ -197,12 +212,18 @@ class TradingBot:
             except Exception as e:
                 logger.error(f"Error evaluating rebuy opportunities: {e}")
 
-    def calculate_trailing_stop(self, current_price):
+
+    def calculate_trailing_stop(self, symbol):
         """ Part of the sell logic, 
             will sell if stock dips below peak to maximize gains, 
             hopefully to be rebought in the future """
-        max_price = self.posman.calculate_stop_loss(current_price)# default .05 risk threshold
-        return max_price
+        raw_data = self.alpaca.fetch_raw_data(symbol=symbol)
+        sell_price = self.posman.calculate_stop_loss(raw_data['open'], .075)# default .05 risk threshold
+
+        data = self.alpaca.fetch_positions()
+        current_price = data[symbol]['market_price']
+
+        return sell_price > current_price
 
     
     async def run(self):
@@ -214,7 +235,7 @@ class TradingBot:
         tasks = [
             self.safe_task(self.update_live_data),    
             self.safe_task(self.monitor_market),
-            self.safe_task(self.evaluate_rebuy_opportunities),
+            #self.safe_task(self.evaluate_rebuy_opportunities),
             ]
         await asyncio.gather(*tasks)
 

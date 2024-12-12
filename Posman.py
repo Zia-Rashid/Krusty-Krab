@@ -1,3 +1,8 @@
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("Posman")
+logger.setLevel(logging.INFO)
 
 class Posman:
     def __init__(self, bot) -> None:
@@ -5,21 +10,54 @@ class Posman:
 
     def calculate_position_value(self, symbol):
         """
-        Calculate the value of a position (quantity * price).
+        Calculate the total value of all stocks for a given symbol based on quantity and buy price.
         """
-        qty = self.bot.alpaca.positions.get(symbol)[0]
-        price = self.bot.alpaca.positions.get(symbol)[1]
-        return qty * price 
+        try:
+            # Ensure the symbol exists in both positions and the checkbook
+            if symbol not in self.bot.alpaca.positions:
+                raise ValueError(f"Symbol {symbol} not found in positions.")
+            
+            if symbol not in self.bot.alpaca.checkbook:
+                raise ValueError(f"Buy price for {symbol} not found in checkbook.")
+            
+            # Get the quantity of stocks held for the symbol
+            qty = self.bot.alpaca.positions[symbol]['qty']
+            if not qty or qty <= 0:
+                raise ValueError(f"Invalid quantity {qty} for symbol {symbol}.")
+            
+            # Get the average buy price from the checkbook
+            buy_prices = self.bot.alpaca.checkbook[symbol]
+            if not isinstance(buy_prices, list) or not buy_prices:
+                raise ValueError(f"No buy prices recorded for symbol {symbol}.")
+            
+            avg_buy_price = sum(buy_prices) / len(buy_prices)
+
+            # Calculate the total position value
+            total_position_value = avg_buy_price * qty
+            return total_position_value
+
+        except Exception as e:
+            logging.error(f"Error calculating position value for {symbol}: {e}")
+            raise
+
     
     def available_funds(self):
         """
         returns uninvested funds
         """
-        cash = self.bot.alpaca.calculate_portfolio_value()
-        positions = self.bot.alpaca.fetch_positions()
-        for symbol in positions:
-            cash -= self.calculate_position_value(symbol=symbol)
-        return cash
+        try:
+            total_portfolio_value = self.bot.alpaca.calculate_portfolio_value()
+            total_positions_value = 0
+            positions = self.bot.alpaca.fetch_positions()
+
+            for symbol in positions:
+                total_positions_value += self.calculate_position_value(symbol=symbol)
+            available_funds = float(total_portfolio_value) - total_positions_value
+            return available_funds
+        except Exception as e:
+            print("Error calculating funds...")
+            return 0.0
+
     
     def position_sizing_strategy(self, symbol, portfolio_value, available_cash, max_position_size=0.10):
         """

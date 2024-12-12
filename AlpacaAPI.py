@@ -1,3 +1,4 @@
+from collections import defaultdict
 import alpaca_trade_api as tradeapi
 from alpaca_trade_api.rest import TimeFrame, REST
 from datetime import date, timedelta
@@ -19,13 +20,19 @@ class AlpacaAPI:
         self.checkbook = {}  # Track buy prices
         self.sold_book = {}  # History sold symbols
 
+    from collections import defaultdict
+
     def populate_checkbook(self):
         """
-        Fetch past buy orders and populate the checkbook with the buy price.
+        Fetch past buy orders and populate the checkbook with all buy prices for each symbol.
         """
         try:
-            # Fetch all closed orders (or you can adjust with time range/limit)
-            orders = self.api.list_orders(status='filled', limit=500)  # Adjust 'limit' as needed
+            # Initialize checkbook as a defaultdict of lists
+            if not isinstance(self.checkbook, defaultdict):
+                self.checkbook = defaultdict(list)
+
+            # Fetch all closed orders
+            orders = self.api.list_orders(status='filled', limit=500)
 
             for order in orders:
                 # Only process buy orders
@@ -33,10 +40,10 @@ class AlpacaAPI:
                     symbol = order.symbol
                     buy_price = float(order.filled_avg_price)
 
-                    # Add to checkbook if not already added
-                    if symbol not in self.checkbook:
-                        self.checkbook[symbol] = buy_price
-                        logging.info(f"Added {symbol} to checkbook with buy price {buy_price}")
+                    # Append buy price to the list for the symbol
+                    if buy_price not in self.checkbook[symbol]:
+                       self.checkbook[symbol].append(buy_price)
+                       logging.info(f"Added {symbol} to checkbook with buy price {buy_price}")
 
         except Exception as e:
             logging.error(f"Error populating checkbook: {e}")
@@ -58,13 +65,34 @@ class AlpacaAPI:
 
     def fetch_positions(self):
         """
-        Fetch current positions from Alpaca API.
+        Fetch current positions from Alpaca API, including real-time market prices.
         """
         try:
+            # Fetch current positions
             positions = self.api.list_positions()
-            self.positions = {pos.symbol: [int(pos.qty), float(pos.current_price)] for pos in positions}
+
+            # Store positions with additional real-time price info
+            self.positions = {}
+            for pos in positions:
+                symbol = pos.symbol
+                qty = int(pos.qty)
+                current_price = float(pos.current_price)
+
+                # Fetch the latest market price (real-time data)
+                try:
+                    latest_trade = self.api.get_latest_trade(symbol=symbol, feed='iex')
+                    market_price = float(latest_trade.price)  # Real-time price
+                except Exception as e:
+                    market_price = current_price  # Fallback to Alpaca's current_price
+                    logger.warning(f"Error fetching real-time price for {symbol}: {e}")
+
+                self.positions[symbol] = {
+                    'qty': int(qty),
+                    'current_price': float(current_price),  # From Alpaca position data
+                    'market_price': float(market_price)    # Real-time market price
+                }
+            self.populate_checkbook()
             return self.positions
-        
         except tradeapi.rest.APIError as e:
             raise Exception(f"Error fetching positions: {e}")
 
@@ -110,12 +138,29 @@ class AlpacaAPI:
         except Exception as e:
             logger.error(f"Error fetching historical data for {symbol}: {e}")
             raise
+
     
-    def fetch_raw_data(self, symbol): #In the future consider a similar class that fetches data for the entire market and have it as a par tof update_live_data
+    def fetch_raw_data(self, symbol):
         """
-        Fetches all of the current data
+        Fetches the latest bar data for a specific symbol.
+        Returns a dictionary with relevant fields like open, high, low, close, volume.
         """
-        return self.api.get_latest_bar(symbol=symbol, feed='iex')
+        try:
+            latest_bar = self.api.get_latest_bar(symbol=symbol, feed='iex')  # Fetch data
+            # Format the data as a dictionary
+            return {
+                'open': latest_bar.o,
+                'high': latest_bar.h,
+                'low': latest_bar.l,
+                'close': latest_bar.c,
+                'volume': latest_bar.v,
+                'timestamp': latest_bar.t
+            }
+        except Exception as e:
+            logger.error(f"Error fetching raw data for {symbol}: {e}")
+            return None
+
+    
     
     def fetch_all_transactions(self, status='filled', limit=200):
         """
@@ -175,11 +220,11 @@ if __name__ == "__main__":
     #     print(f"Error placing order: {e}")
 
     # Fetch historical data
-    data = alpaca.fetch_historical_data("RGTI", "2024-11-01")
-    print(data)
-    print("\n\n")
-    raw_data = alpaca.api.get_latest_bars("RGTI")
-    print(raw_data)
+    # data = alpaca.fetch_historical_data("RGTI", "2024-11-01")
+    # print(data)
+    # print("\n\n")
+    # raw_data = alpaca.api.get_latest_bars("RGTI")
+    # print(raw_data)
 
     # # Check if market is open
     # is_open = alpaca.is_market_open()
